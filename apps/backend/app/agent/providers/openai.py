@@ -21,6 +21,9 @@ class OpenAIProvider(Provider):
         self.instructions = ""
 
     def _generate_sync(self, prompt: str, options: Dict[str, Any]) -> str:
+        logger.error(f"Generating response with OpenAI model: {self.model}")
+        logger.error(f"Prompt: {prompt}")
+        logger.error(f"Options: {options}")
         try:
             response = self._client.responses.create(
                 model=self.model,
@@ -36,8 +39,8 @@ class OpenAIProvider(Provider):
         opts = {
             "temperature": generation_args.get("temperature", 0),
             "top_p": generation_args.get("top_p", 0.9),
-            "top_k": generation_args.get("top_k", 40),
-            "max_tokens": generation_args.get("max_length", 20000),
+            # "top_k": generation_args.get("top_k", 40),
+            "max_output_tokens": generation_args.get("max_length", 20000),
         }
         return await run_in_threadpool(self._generate_sync, prompt, opts)
 

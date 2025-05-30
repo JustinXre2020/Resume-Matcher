@@ -38,6 +38,8 @@ uv.lock
 # SQLite databases
 *.sqlite3
 *.db
+*db-shm
+*db-wal
 
 # Test artifacts
 .pytest_cache/

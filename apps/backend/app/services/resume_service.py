@@ -38,20 +38,28 @@ class ResumeService:
         Returns:
             None
         """
+        logger.error("write temp file!")
+        
         with tempfile.NamedTemporaryFile(
             delete=False, suffix=self._get_file_extension(file_type)
         ) as temp_file:
             temp_file.write(file_bytes)
             temp_path = temp_file.name
 
+        logger.error("before store in db")
+
         try:
             result = self.md.convert(temp_path)
             text_content = result.text_content
             resume_id = await self._store_resume_in_db(text_content, content_type)
 
+            logger.info("Waiting for extractions")
+
             await self._extract_and_store_structured_resume(
                 resume_id=resume_id, resume_text=text_content
             )
+
+            logger.info("Finish extractions")
 
             return resume_id
         finally:
