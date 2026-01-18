@@ -125,7 +125,7 @@ export const PROVIDER_INFO: Record<
     defaultModel: 'anthropic/claude-3.5-sonnet',
     requiresKey: true,
   },
-  gemini: { name: 'Google Gemini', defaultModel: 'gemini-1.5-flash', requiresKey: true },
+  gemini: { name: 'Google Gemini', defaultModel: 'gemini-3-flash-preview', requiresKey: true },
   deepseek: { name: 'DeepSeek', defaultModel: 'deepseek-chat', requiresKey: true },
   ollama: { name: 'Ollama (Local)', defaultModel: 'llama3.2', requiresKey: false },
 };

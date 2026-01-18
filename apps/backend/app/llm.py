@@ -42,15 +42,25 @@ def _normalize_api_base(provider: str, api_base: str | None) -> str | None:
 
     base = base.rstrip("/")
 
+    # Gemini (Google AI Studio) should not set api_base at all. LiteLLM builds
+    # the generativelanguage.googleapis.com URL internally.
+    if provider == "gemini" and "generativelanguage.googleapis.com" in base:
+        return None
+
     # Anthropic handler appends '/v1/messages'. If base already ends with '/v1',
     # strip it to avoid '/v1/v1/messages'.
     if provider == "anthropic" and base.endswith("/v1"):
         base = base[: -len("/v1")].rstrip("/")
 
-    # Gemini handler appends '/v1/models/...'. If base already ends with '/v1',
-    # strip it to avoid '/v1/v1/models/...'.
-    if provider == "gemini" and base.endswith("/v1"):
-        base = base[: -len("/v1")].rstrip("/")
+    # Gemini handler appends '/v1beta/models/...'. If base already contains
+    # version/model segments, strip them to avoid duplicated paths.
+    if provider == "gemini":
+        if base.endswith("/v1beta/models"):
+            base = base[: -len("/v1beta/models")].rstrip("/")
+        elif base.endswith("/v1beta"):
+            base = base[: -len("/v1beta")].rstrip("/")
+        elif base.endswith("/v1"):
+            base = base[: -len("/v1")].rstrip("/")
 
     return base or None
 
@@ -116,12 +126,14 @@ def get_model_name(config: LLMConfig) -> str:
     For most providers, adds the provider prefix if not already present.
     For OpenRouter, always adds 'openrouter/' prefix since OpenRouter models
     use nested prefixes like 'openrouter/anthropic/claude-3.5-sonnet'.
+    For Gemini (Google AI Studio), the 'gemini/' prefix is REQUIRED to use
+    API key auth instead of Vertex AI's service account auth.
     """
     provider_prefixes = {
         "openai": "",  # OpenAI models don't need prefix
         "anthropic": "anthropic/",
         "openrouter": "openrouter/",
-        "gemini": "gemini/",
+        "gemini": "gemini/",  # Required for Google AI Studio API key auth
         "deepseek": "deepseek/",
         "ollama": "ollama/",
     }
@@ -134,6 +146,13 @@ def get_model_name(config: LLMConfig) -> str:
         if config.model.startswith("openrouter/"):
             return config.model
         return f"openrouter/{config.model}"
+
+    # For Gemini (Google AI Studio), always ensure gemini/ prefix is present
+    # This tells LiteLLM to use API key auth, not Vertex AI service account
+    if config.provider == "gemini":
+        if config.model.startswith("gemini/"):
+            return config.model
+        return f"gemini/{config.model}"
 
     # For other providers, don't add prefix if model already has a known prefix
     known_prefixes = ["openrouter/", "anthropic/", "gemini/", "deepseek/", "ollama/"]

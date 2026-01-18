@@ -1,0 +1,84 @@
+name: Job Hunter Sentinel - Scheduled Runs
+
+on:
+  # Multiple daily schedules: 8 AM, 12 PM, 6 PM Beijing Time
+  # UTC times: 0:00 (8 AM Beijing), 4:00 (12 PM Beijing), 10:00 (6 PM Beijing)
+  schedule:
+    - cron: '0 0 * * *'   # 8:00 AM Beijing Time (UTC 0:00)
+    - cron: '0 4 * * *'   # 12:00 PM Beijing Time (UTC 4:00)
+    - cron: '0 10 * * *'  # 6:00 PM Beijing Time (UTC 10:00)
+  
+  # Allow manual trigger
+  workflow_dispatch:
+
+jobs:
+  run-job-hunter:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+      
+      - name: Install dependencies
+        working-directory: apps/jobsrapper
+        run: |
+          uv venv .venv
+          uv pip install -e .
+      
+      - name: Run Job Hunter Sentinel
+        working-directory: apps/jobsrapper
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SEARCH_TERMS: ${{ vars.SEARCH_TERMS }}
+          LOCATIONS: ${{ vars.LOCATIONS }}
+          RESULTS_WANTED: ${{ vars.RESULTS_WANTED }}
+          HOURS_OLD: ${{ vars.HOURS_OLD }}
+          MIN_SCORE: ${{ vars.MIN_SCORE }}
+        run: |
+          source .venv/bin/activate
+          python main.py
+      
+      - name: Upload execution logs
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: job-hunter-logs-${{ github.run_number }}
+          path: apps/jobsrapper/*.log
+          retention-days: 7
+      
+      - name: Upload scraped data
+        if: success()
+        uses: actions/upload-artifact@v3
+        with:
+          name: job-data-${{ github.run_number }}
+          path: apps/jobsrapper/data/*.json
+          retention-days: 14
+      
+      - name: Commit data changes
+        if: success()
+        run: |
+          cd apps/jobsrapper
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          
+          # Add database and data files
+          git add sent_jobs.txt data/*.json data/*.csv || true
+          
+          # Commit if there are changes
+          if ! git diff --staged --quiet; then
+            git commit -m "Auto-update: Job data $(date '+%Y-%m-%d %H:%M') [skip ci]"
+            git push
+          fi

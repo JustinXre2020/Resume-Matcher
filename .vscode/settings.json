@@ -1,0 +1,8 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^cd /home/jxre2000/Resume-Matcher/apps/jobsrapper && source \\.venv/bin/activate && python --version && which python$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}
