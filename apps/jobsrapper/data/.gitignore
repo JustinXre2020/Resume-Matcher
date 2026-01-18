@@ -1,0 +1,6 @@
+# Data folder for scraped job postings
+*.json
+*.csv
+
+# Keep the directory
+!.gitkeep
