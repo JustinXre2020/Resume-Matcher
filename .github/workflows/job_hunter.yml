@@ -55,6 +55,7 @@ jobs:
         with:
           name: job-hunter-logs-${{ github.run_number }}
           path: apps/jobsrapper/*.log
+          if-no-files-found: warn
           retention-days: 7
       
       - name: Upload scraped data
@@ -63,6 +64,7 @@ jobs:
         with:
           name: job-data-${{ github.run_number }}
           path: apps/jobsrapper/data/*.json
+          if-no-files-found: warn
           retention-days: 14
       
       - name: Commit data changes
