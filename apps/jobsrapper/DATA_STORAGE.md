@@ -58,9 +58,9 @@ tail -f logs/cron_18.log   # 查看 18点的运行日志
 #### 方式二：GitHub Actions（云端自动化）
 
 已更新 `.github/workflows/job_hunter.yml`，支持每天 3 次运行：
-- 🌅 **8:00 AM** Beijing Time (UTC 0:00)
-- 🏙️ **12:00 PM** Beijing Time (UTC 4:00)
-- 🌆 **6:00 PM** Beijing Time (UTC 10:00)
+- 🌅 **8:00 AM** Eastern Time (UTC 13:00)
+- 🏙️ **12:00 PM** Eastern Time (UTC 17:00)
+- 🌆 **6:00 PM** Eastern Time (UTC 23:00)
 
 数据将自动：
 - 📤 上传为 GitHub Artifacts（保留 14 天）
@@ -156,9 +156,9 @@ CRON_JOB_18="0 18 * * * ..."  # 每天 18:00
 编辑 `.github/workflows/job_hunter.yml`：
 ```yaml
 schedule:
-  - cron: '0 0 * * *'   # UTC 0:00 = 北京 8:00
-  - cron: '0 4 * * *'   # UTC 4:00 = 北京 12:00
-  - cron: '0 10 * * *'  # UTC 10:00 = 北京 18:00
+  - cron: '0 13 * * *'  # UTC 13:00 = ET 8:00 AM
+  - cron: '0 17 * * *'  # UTC 17:00 = ET 12:00 PM
+  - cron: '0 23 * * *'  # UTC 23:00 = ET 6:00 PM
 ```
 
 ## 📝 使用示例

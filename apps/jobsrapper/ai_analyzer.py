@@ -27,7 +27,7 @@ class AIAnalyzer:
             raise ValueError("GEMINI_API_KEY not found in environment")
         
         genai.configure(api_key=self.api_key)
-        self.model = genai.GenerativeModel('gemini-1.5-flash')
+        self.model = genai.GenerativeModel('gemini-2.0-flash-exp')
         
         # Analysis prompt template
         self.prompt_template = """你是一个资深移民律师和技术招聘官。请分析以下岗位描述，评估其对 H-1B 签证申请人的友好程度。

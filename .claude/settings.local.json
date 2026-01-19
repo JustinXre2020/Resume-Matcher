@@ -13,7 +13,9 @@
       "Bash(wc:*)",
       "Bash(cat:*)",
       "Bash(head:*)",
-      "Bash(npm run format:*)"
+      "Bash(npm run format:*)",
+      "Bash(source .venv/bin/activate)",
+      "Bash(python main.py:*)"
     ]
   }
 }

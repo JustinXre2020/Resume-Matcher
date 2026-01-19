@@ -50,6 +50,7 @@ class JobScraper:
                     location=location,
                     results_wanted=results_wanted,
                     hours_old=hours_old,
+                    job_type="fulltime",
                     country_indeed='USA',
                     linkedin_fetch_description=False,  # Fast initial scrape
                     description_format="markdown"
