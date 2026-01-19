@@ -1,12 +1,12 @@
 name: Job Hunter Sentinel - Scheduled Runs
 
 on:
-  # Multiple daily schedules: 8 AM, 12 PM, 6 PM Beijing Time
-  # UTC times: 0:00 (8 AM Beijing), 4:00 (12 PM Beijing), 10:00 (6 PM Beijing)
+  # Multiple daily schedules: 8 AM, 2 PM, 8 PM Eastern Standard Time (EST/UTC-5)
+  # Each run searches for jobs posted in the last 6 hours
   schedule:
-    - cron: '0 0 * * *'   # 8:00 AM Beijing Time (UTC 0:00)
-    - cron: '0 4 * * *'   # 12:00 PM Beijing Time (UTC 4:00)
-    - cron: '0 10 * * *'  # 6:00 PM Beijing Time (UTC 10:00)
+    - cron: '0 13 * * *'  # 8:00 AM EST (UTC 13:00)
+    - cron: '0 19 * * *'  # 2:00 PM EST (UTC 19:00)
+    - cron: '0 1 * * *'   # 8:00 PM EST (UTC 01:00 next day)
   
   # Allow manual trigger
   workflow_dispatch:
@@ -38,7 +38,6 @@ jobs:
       - name: Run Job Hunter Sentinel
         working-directory: apps/jobsrapper
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -46,14 +45,13 @@ jobs:
           LOCATIONS: ${{ vars.LOCATIONS }}
           RESULTS_WANTED: ${{ vars.RESULTS_WANTED }}
           HOURS_OLD: ${{ vars.HOURS_OLD }}
-          MIN_SCORE: ${{ vars.MIN_SCORE }}
         run: |
           source .venv/bin/activate
           python main.py
       
       - name: Upload execution logs
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: job-hunter-logs-${{ github.run_number }}
           path: apps/jobsrapper/*.log
@@ -61,7 +59,7 @@ jobs:
       
       - name: Upload scraped data
         if: success()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: job-data-${{ github.run_number }}
           path: apps/jobsrapper/data/*.json

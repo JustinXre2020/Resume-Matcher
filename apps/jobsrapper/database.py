@@ -27,7 +27,7 @@ class SentJob(Base):
     location = Column(String)
     score = Column(Integer)
     sent_at = Column(DateTime, default=datetime.utcnow)
-    metadata = Column(Text)  # JSON string for additional data
+    job_metadata = Column(Text)  # JSON string for additional data
     
     def __repr__(self):
         return f"<SentJob(url='{self.job_url}', title='{self.title}', company='{self.company}')>"
@@ -143,7 +143,7 @@ class JobDatabase:
                     company=company,
                     location=location,
                     score=score,
-                    metadata=json.dumps(metadata) if metadata else None
+                    job_metadata=json.dumps(metadata) if metadata else None
                 )
                 
                 session.add(sent_job)
@@ -195,7 +195,7 @@ class JobDatabase:
                         "location": job.location,
                         "score": job.score,
                         "sent_at": job.sent_at.isoformat() if job.sent_at else None,
-                        "metadata": json.loads(job.metadata) if job.metadata else None
+                        "metadata": json.loads(job.job_metadata) if job.job_metadata else None
                     }
                     for job in jobs
                 ]

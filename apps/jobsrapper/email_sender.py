@@ -36,59 +36,74 @@ class EmailSender:
     def create_job_html(self, job: Dict) -> str:
         """
         Generate HTML for a single job listing
-        
+
         Args:
-            job: Job dict with analysis results
-            
+            job: Job dict with job data
+
         Returns:
             HTML string
         """
-        job_data = job.get('job_data', job)
-        
-        title = job_data.get('title', 'Unknown Position')
-        company = job_data.get('company', 'Unknown Company')
-        location = job_data.get('location', 'Unknown Location')
-        job_url = job_data.get('job_url', '#')
-        site = job_data.get('site', 'Unknown')
-        score = job.get('score', 0)
-        summary = job.get('summary', '无推荐理由')
-        
-        # Score color coding
-        if score >= 8:
-            score_color = "#22c55e"  # Green
-            score_label = "强烈推荐"
-        elif score >= 6:
-            score_color = "#3b82f6"  # Blue
-            score_label = "推荐"
-        else:
-            score_color = "#94a3b8"  # Gray
-            score_label = "一般"
-        
+        import pandas as pd
+        import re
+
+        # Helper to safely get string values (handles NaN/None)
+        def safe_str(value, default=''):
+            if value is None or (isinstance(value, float) and pd.isna(value)):
+                return default
+            return str(value)
+
+        def markdown_to_html(text: str) -> str:
+            """Convert basic markdown to HTML"""
+            if not text:
+                return text
+            # Remove escape characters
+            text = text.replace('\\-', '-').replace('\\*', '*').replace('\\_', '_')
+            # Bold: **text** or __text__ -> <strong>text</strong>
+            text = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', text)
+            text = re.sub(r'__(.+?)__', r'<strong>\1</strong>', text)
+            # Italic: *text* or _text_ -> <em>text</em>
+            text = re.sub(r'\*(.+?)\*', r'<em>\1</em>', text)
+            text = re.sub(r'_(.+?)_', r'<em>\1</em>', text)
+            # Line breaks
+            text = text.replace('\n', '<br>')
+            # Headers: # text -> bold text
+            text = re.sub(r'^#+\s*(.+?)$', r'<strong>\1</strong>', text, flags=re.MULTILINE)
+            return text
+
+        title = safe_str(job.get('title'), 'Unknown Position')
+        company = safe_str(job.get('company'), 'Unknown Company')
+        location = safe_str(job.get('location'), 'Unknown Location')
+        job_url = safe_str(job.get('job_url'), '#')
+        site = safe_str(job.get('site'), 'Unknown')
+        description = safe_str(job.get('description'), '')
+
+        # Convert markdown to HTML and truncate
+        description = markdown_to_html(description)
+        if description and len(description) > 400:
+            description = description[:400] + "..."
+
         return f"""
         <div style="border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin-bottom: 20px; background-color: #ffffff;">
-            <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 12px;">
+            <div style="margin-bottom: 12px;">
                 <h2 style="margin: 0; font-size: 20px; color: #1e293b;">
                     <a href="{job_url}" style="color: #2563eb; text-decoration: none;">{title}</a>
                 </h2>
-                <div style="background-color: {score_color}; color: white; padding: 4px 12px; border-radius: 4px; font-weight: bold; font-size: 14px; white-space: nowrap;">
-                    {score}/10 {score_label}
-                </div>
             </div>
-            
+
             <div style="color: #64748b; font-size: 14px; margin-bottom: 8px;">
-                <span style="font-weight: 600; color: #475569;">📍 {company}</span> · {location}
+                <span style="font-weight: 600; color: #475569;">🏢 {company}</span> · 📍 {location}
             </div>
-            
+
             <div style="color: #94a3b8; font-size: 12px; margin-bottom: 12px;">
-                来源: {site.upper()}
+                来源: {site.upper() if site else 'N/A'}
             </div>
-            
-            <div style="background-color: #f8fafc; padding: 12px; border-radius: 6px; border-left: 3px solid {score_color};">
+
+            {f'''<div style="background-color: #f8fafc; padding: 12px; border-radius: 6px; margin-bottom: 12px;">
                 <p style="margin: 0; color: #334155; font-size: 14px; line-height: 1.6;">
-                    💡 <strong>AI 推荐理由：</strong>{summary}
+                    {description}
                 </p>
-            </div>
-            
+            </div>''' if description else ''}
+
             <div style="margin-top: 12px;">
                 <a href="{job_url}" style="display: inline-block; background-color: #2563eb; color: white; padding: 8px 16px; border-radius: 6px; text-decoration: none; font-size: 14px; font-weight: 500;">
                     查看详情 →
@@ -266,36 +281,30 @@ class EmailSender:
 def main():
     """Test email sending"""
     sender = EmailSender()
-    
+
     # Test jobs
     test_jobs = [
         {
-            "score": 9,
-            "summary": "顶级科技公司，明确支持 O-1 签证，涉及前沿 AI 技术，职位要求高级技术专家，非常适合杰出人才申请。",
-            "job_data": {
-                "title": "Senior ML Engineer",
-                "company": "Google",
-                "location": "Mountain View, CA",
-                "job_url": "https://example.com/job/1",
-                "site": "linkedin"
-            }
+            "title": "Junior Software Engineer",
+            "company": "Google",
+            "location": "Mountain View, CA",
+            "job_url": "https://example.com/job/1",
+            "site": "linkedin",
+            "description": "Entry level position for new graduates. Work on cutting-edge technology."
         },
         {
-            "score": 7,
-            "summary": "知名创业公司，技术栈先进，虽然签证支持未明确，但公司规模和技术挑战度较高，值得尝试。",
-            "job_data": {
-                "title": "Full Stack Engineer",
-                "company": "OpenAI",
-                "location": "San Francisco, CA",
-                "job_url": "https://example.com/job/2",
-                "site": "indeed"
-            }
+            "title": "Entry Level Full Stack Engineer",
+            "company": "OpenAI",
+            "location": "San Francisco, CA",
+            "job_url": "https://example.com/job/2",
+            "site": "indeed",
+            "description": "Join our team as a new grad engineer and help build the future of AI."
         }
     ]
-    
+
     # Send test email
     sender.send_daily_digest(test_jobs)
-    
+
     # Test empty notification
     # sender.send_empty_notification()
 

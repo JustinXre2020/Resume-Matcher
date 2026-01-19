@@ -5,10 +5,18 @@ Handles saving, loading, and cleanup of scraped job data
 import os
 import json
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import List, Dict, Optional
 import glob
+
+
+class DateTimeEncoder(json.JSONEncoder):
+    """Custom JSON encoder for datetime and date objects"""
+    def default(self, obj):
+        if isinstance(obj, (datetime, date)):
+            return obj.isoformat()
+        return super().default(obj)
 
 
 class DataManager:
@@ -68,7 +76,7 @@ class DataManager:
         
         # Save as JSON
         with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(data_to_save, f, indent=2, ensure_ascii=False)
+            json.dump(data_to_save, f, indent=2, ensure_ascii=False, cls=DateTimeEncoder)
         
         print(f"💾 Saved {len(jobs_data)} jobs to {filepath}")
         return str(filepath)
