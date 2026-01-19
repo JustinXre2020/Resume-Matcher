@@ -51,7 +51,8 @@ apps/backend/data/config.json
 # cursor related files
 .cursor/
 .cursorrules
-.workflows
+
+workflows/
 
 .DS_Store
 
