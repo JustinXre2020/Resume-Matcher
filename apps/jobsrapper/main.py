@@ -14,6 +14,7 @@ from scraper import JobScraper
 from database import JobDatabase
 from email_sender import EmailSender
 from data_manager import DataManager
+from llm_filter import LocalLLMFilter
 
 load_dotenv()
 
@@ -62,12 +63,20 @@ class JobHunterSentinel:
             self.locations = self._get_list_config("LOCATIONS", ["San Francisco, CA"])
             self.results_wanted = int(os.getenv("RESULTS_WANTED", "20"))
             self.hours_old = int(os.getenv("HOURS_OLD", "24"))
+            self.use_llm_filter = os.getenv("USE_LLM_FILTER", "true").lower() == "true"
+
+            # Initialize LLM filter if enabled
+            self.llm_filter = None
+            if self.use_llm_filter:
+                print("🤖 Initializing Local LLM Filter...")
+                self.llm_filter = LocalLLMFilter()
 
             print(f"✅ Configuration loaded:")
             print(f"   Search Terms: {self.search_terms}")
             print(f"   Locations: {self.locations}")
             print(f"   Results Wanted: {self.results_wanted}")
             print(f"   Time Window: {self.hours_old} hours")
+            print(f"   LLM Filter: {'Enabled' if self.use_llm_filter else 'Disabled'}")
 
         except Exception as e:
             print(f"❌ Initialization failed: {e}")
@@ -208,14 +217,21 @@ class JobHunterSentinel:
 
             print(f"\n✅ Scraped {len(jobs_df)} total jobs")
 
-            # Step 2: Filter for entry-level and H1B-friendly jobs
-            print(f"\n🎯 STEP 2: Filtering for entry-level & H1B-friendly jobs...")
+            # Step 2: LLM-based filtering for entry-level and H1B-friendly jobs
+            print(f"\n🤖 STEP 2: LLM filtering (entry-level & H1B)...")
             print("-" * 60)
             jobs_list = jobs_df.to_dict('records')
-            filtered_jobs = self.filter_jobs(jobs_list)
+            
+            if self.llm_filter:
+                # Extract base search terms (without level modifiers)
+                base_terms = self._get_base_search_terms()
+                filtered_jobs = self.llm_filter.filter_jobs(jobs_list, base_terms)
+            else:
+                print("⚠️ LLM filter not available, using rule-based fallback...")
+                filtered_jobs = self.filter_jobs(jobs_list)
 
             if not filtered_jobs:
-                print("\n⚠️ No jobs passed filters. Sending empty notification...")
+                print("\n⚠️ No jobs passed LLM filters. Sending empty notification...")
                 self.email_sender.send_empty_notification()
                 self._print_summary(start_time, len(jobs_df), 0)
                 return
@@ -288,6 +304,26 @@ class JobHunterSentinel:
             import traceback
             traceback.print_exc()
             sys.exit(1)
+
+    def _get_base_search_terms(self) -> List[str]:
+        """Extract base search terms without level modifiers for LLM matching"""
+        base_terms = set()
+        level_modifiers = [
+            'entry level', 'entry-level', 'junior', 'associate', 'new grad',
+            'new graduate', 'early career', 'graduate'
+        ]
+
+        for term in self.search_terms:
+            term_lower = term.lower()
+            # Remove level modifiers to get base role
+            base_term = term_lower
+            for modifier in level_modifiers:
+                base_term = base_term.replace(modifier, '').strip()
+
+            if base_term:
+                base_terms.add(base_term)
+
+        return list(base_terms)
 
     def _print_summary(self, start_time: datetime, scraped: int, sent: int):
         """Print execution summary"""

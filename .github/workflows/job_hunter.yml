@@ -1,0 +1,117 @@
+name: Job Hunter Sentinel - Scheduled Runs
+
+on:
+  # Multiple daily schedules: 8 AM, 2 PM, 8 PM Eastern Standard Time (EST/UTC-5)
+  # Each run searches for jobs posted in the last 6 hours
+  schedule:
+    - cron: '0 13 * * *'  # 8:00 AM EST (UTC 13:00)
+    - cron: '0 19 * * *'  # 2:00 PM EST (UTC 19:00)
+    - cron: '0 1 * * *'   # 8:00 PM EST (UTC 01:00 next day)
+  
+  # Allow manual trigger
+  workflow_dispatch:
+
+jobs:
+  run-job-hunter:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+      
+      - name: Install dependencies
+        working-directory: apps/jobsrapper
+        run: |
+          uv venv .venv
+          uv pip install -e .
+          uv pip install llama-cpp-python huggingface_hub
+
+      - name: Cache LLM model
+        uses: actions/cache@v4
+        with:
+          path: apps/jobsrapper/models
+          key: llm-model-lfm2.5-1.2b-q8
+          restore-keys: |
+            llm-model-lfm2.5-
+
+      - name: Download LLM model from HuggingFace
+        working-directory: apps/jobsrapper
+        run: |
+          source .venv/bin/activate
+          python -c "
+          from huggingface_hub import hf_hub_download
+          from pathlib import Path
+
+          model_dir = Path('models')
+          model_dir.mkdir(exist_ok=True)
+          model_file = 'LFM2.5-1.2B-Instruct-Q8_0.gguf'
+
+          if not (model_dir / model_file).exists():
+              print(f'Downloading {model_file} from HuggingFace...')
+              hf_hub_download(
+                  repo_id='LiquidAI/LFM2.5-1.2B-Instruct-GGUF',
+                  filename=model_file,
+                  local_dir=str(model_dir)
+              )
+              print('Download complete!')
+          else:
+              print('Model already exists, skipping download.')
+          "
+
+      - name: Run Job Hunter Sentinel
+        working-directory: apps/jobsrapper
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SEARCH_TERMS: ${{ vars.SEARCH_TERMS }}
+          LOCATIONS: ${{ vars.LOCATIONS }}
+          RESULTS_WANTED: ${{ vars.RESULTS_WANTED }}
+          HOURS_OLD: ${{ vars.HOURS_OLD }}
+        run: |
+          source .venv/bin/activate
+          python main.py
+      
+      - name: Upload execution logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: job-hunter-logs-${{ github.run_number }}
+          path: apps/jobsrapper/*.log
+          if-no-files-found: warn
+          retention-days: 7
+      
+      - name: Upload scraped data
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: job-data-${{ github.run_number }}
+          path: apps/jobsrapper/data/*.json
+          if-no-files-found: warn
+          retention-days: 14
+      
+      - name: Commit data changes
+        if: success()
+        run: |
+          cd apps/jobsrapper
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          
+          # Add database and data files
+          git add sent_jobs.txt data/*.json data/*.csv || true
+          
+          # Commit if there are changes
+          if ! git diff --staged --quiet; then
+            git commit -m "Auto-update: Job data $(date '+%Y-%m-%d %H:%M') [skip ci]"
+            git push
+          fi
