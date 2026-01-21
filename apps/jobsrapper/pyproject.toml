@@ -16,6 +16,7 @@ dependencies = [
     "resend>=0.7.0",
     "python-dotenv>=1.0.0",
     "sqlalchemy>=2.0.0",
+    "psutil>=5.9.0",
     "llama-cpp-python>=0.2.0",
     "huggingface-hub>=0.20.0",
 ]
