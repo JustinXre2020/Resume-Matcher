@@ -77,6 +77,9 @@ jobs:
           LOCATIONS: ${{ vars.LOCATIONS }}
           RESULTS_WANTED: ${{ vars.RESULTS_WANTED }}
           HOURS_OLD: ${{ vars.HOURS_OLD }}
+          LLM_WORKERS: ${{ vars.LLM_WORKERS }}
+          USE_LLM_FILTER: ${{ vars.USE_LLM_FILTER }}
+          SITES: ${{ vars.SITES }}
         run: |
           source .venv/bin/activate
           python main.py
