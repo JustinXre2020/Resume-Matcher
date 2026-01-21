@@ -55,7 +55,7 @@ async def parse_resume_to_json(markdown_text: str) -> dict[str, Any]:
         prompt=prompt,
         system_prompt="You are a JSON extraction engine. Output only valid JSON, no explanations.",
     )
-
+    print(result)
     # Validate against schema
     validated = ResumeData.model_validate(result)
     return validated.model_dump()

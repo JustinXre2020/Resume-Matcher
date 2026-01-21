@@ -1,14 +1,176 @@
 """
 Local LLM Filter using LiquidAI/LFM2.5-1.2B-Instruct
 Filters jobs based on keyword match, visa sponsorship, and entry-level requirements
+Supports multiprocessing for parallel inference
 """
 import os
 import json
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 from huggingface_hub import hf_hub_download
 from llama_cpp import Llama
 import pandas as pd
+import multiprocessing as mp
+from functools import partial
+import psutil
+
+# Global worker state (initialized per process)
+_worker_llm: Optional[Llama] = None
+_worker_model_path: Optional[str] = None
+
+
+def _init_worker(model_path: str, n_ctx: int, n_threads: int) -> None:
+    """Initialize LLM model in worker process"""
+    global _worker_llm, _worker_model_path
+    _worker_model_path = model_path
+    print(f"   🔧 Worker {mp.current_process().name} loading model...")
+    _worker_llm = Llama(
+        model_path=model_path,
+        n_ctx=n_ctx,
+        n_threads=n_threads,
+        n_batch=512,
+        verbose=False
+    )
+    print(f"   ✅ Worker {mp.current_process().name} ready")
+
+
+def _safe_str_worker(value, default: str = '') -> str:
+    """Safely convert value to string, handling NaN/None (worker version)"""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return default
+    return str(value)
+
+
+def _create_prompt_worker(job: Dict, search_terms: List[str]) -> str:
+    """Create prompt for job evaluation (worker version)"""
+    title = _safe_str_worker(job.get('title'), 'Unknown')
+    company = _safe_str_worker(job.get('company'), 'Unknown')
+    location = _safe_str_worker(job.get('location'), 'Unknown')
+    description = _safe_str_worker(job.get('description'), '')
+
+    search_terms_str = ", ".join(search_terms)
+
+    prompt = f"""Analyze this job posting and answer with JSON only.
+
+Job Title: {title}
+Company: {company}
+Location: {location}
+Description: {description}
+
+Target Roles: {search_terms_str}
+
+Evaluate:
+1. keyword_match: Does the job title/description match any target roles? (true/false)
+2. visa_sponsorship: Does it mention H1B, visa sponsorship, or NOT explicitly reject sponsorship? (true/false)
+3. entry_level: Is this entry-level (0-1 years experience required or doesn't mention experience at all)? Check for "entry", "junior", "associate", "new grad", or the requireed years of experience is less than/equal to 1.(true/false)
+4. requires_phd: Does it require a PhD or doctorate? (true/false)
+
+Respond ONLY with valid JSON:
+{{"keyword_match": true/false, "visa_sponsorship": true/false, "entry_level": true/false, "requires_phd": true/false, "reason": "brief explanation"}}"""
+
+    return prompt
+
+
+def _parse_response_worker(response_text: str) -> Dict:
+    """Parse LLM response into structured result (worker version)"""
+    try:
+        start = response_text.find('{')
+        end = response_text.rfind('}') + 1
+
+        if start >= 0 and end > start:
+            json_str = response_text[start:end]
+            result = json.loads(json_str)
+
+            return {
+                "keyword_match": result.get("keyword_match", True),
+                "visa_sponsorship": result.get("visa_sponsorship", True),
+                "entry_level": result.get("entry_level", True),
+                "requires_phd": result.get("requires_phd", False),
+                "reason": result.get("reason", "")
+            }
+        else:
+            response_lower = response_text.lower()
+            return {
+                "keyword_match": "keyword_match\": true" in response_lower,
+                "visa_sponsorship": "visa_sponsorship\": true" in response_lower,
+                "entry_level": "entry_level\": true" in response_lower,
+                "requires_phd": "requires_phd\": true" in response_lower,
+                "reason": "Parsed from text response"
+            }
+
+    except json.JSONDecodeError:
+        return {
+            "keyword_match": True,
+            "visa_sponsorship": True,
+            "entry_level": True,
+            "requires_phd": False,
+            "reason": "JSON parse error - defaulting to pass"
+        }
+
+
+def _evaluate_job_worker(args: Tuple[Dict, List[str]]) -> Dict:
+    """
+    Evaluate a single job using the worker's LLM instance.
+
+    Args:
+        args: Tuple of (job dict, search_terms list)
+
+    Returns:
+        Evaluation result dict with '_job' key containing original job
+    """
+    global _worker_llm
+    job, search_terms = args
+
+    try:
+        desc = _safe_str_worker(job.get('description'), '')
+        if not desc or len(desc) < 50:
+            return {
+                "keyword_match": False,
+                "visa_sponsorship": False,
+                "entry_level": False,
+                "requires_phd": False,
+                "reason": "No description available - skipped",
+                "skipped": True,
+                "job_title": job.get('title', 'Unknown'),
+                "company": job.get('company', 'Unknown'),
+                "_job": job
+            }
+
+        prompt = _create_prompt_worker(job, search_terms)
+
+        _worker_llm.reset()
+
+        messages = [
+            {"role": "system", "content": "You are a job posting analyzer. Respond only with valid JSON."},
+            {"role": "user", "content": prompt}
+        ]
+
+        response = _worker_llm.create_chat_completion(
+            messages=messages,
+            max_tokens=256,
+            temperature=0.1,
+        )
+
+        response_text = response['choices'][0]['message']['content'].strip()
+        result = _parse_response_worker(response_text)
+        result['job_title'] = job.get('title', 'Unknown')
+        result['company'] = job.get('company', 'Unknown')
+        result['_job'] = job
+
+        return result
+
+    except Exception as e:
+        return {
+            "keyword_match": True,
+            "visa_sponsorship": True,
+            "entry_level": True,
+            "requires_phd": False,
+            "reason": f"LLM error: {str(e)[:50]}",
+            "error": True,
+            "job_title": job.get('title', 'Unknown'),
+            "company": job.get('company', 'Unknown'),
+            "_job": job
+        }
 
 
 class LocalLLMFilter:
@@ -325,6 +487,151 @@ Respond ONLY with valid JSON:
         print(f"   Excluded {excluded_experience} jobs (not entry-level)")
         print(f"   Excluded {excluded_phd} jobs (PhD required)")
         print(f"   ✅ {len(filtered)} jobs passed LLM filter")
+
+        return filtered
+
+    def _calculate_optimal_workers(self, requested_workers: int) -> int:
+        """
+        Calculate optimal number of workers based on available system RAM.
+
+        Each model instance uses approximately 1.5-2GB RAM for this 1.2B model.
+        We reserve 2GB for system overhead and other processes.
+
+        Args:
+            requested_workers: User-requested number of workers
+
+        Returns:
+            Optimal number of workers based on available RAM
+        """
+        try:
+            mem = psutil.virtual_memory()
+            available_gb = mem.available / (1024 ** 3)
+            total_gb = mem.total / (1024 ** 3)
+
+            # Each worker needs ~2GB (model + overhead), reserve 2GB for system
+            ram_per_worker = 2.0
+            system_reserve = 2.0
+
+            usable_ram = available_gb - system_reserve
+            max_workers_by_ram = max(1, int(usable_ram / ram_per_worker))
+
+            # Also limit by CPU cores
+            max_workers_by_cpu = max(1, mp.cpu_count() // 2)
+
+            optimal = min(requested_workers, max_workers_by_ram, max_workers_by_cpu)
+
+            print(f"   💾 RAM: {available_gb:.1f}GB available / {total_gb:.1f}GB total")
+            print(f"   🔢 Workers: requested={requested_workers}, max_by_ram={max_workers_by_ram}, max_by_cpu={max_workers_by_cpu}")
+            print(f"   ✅ Using {optimal} worker(s)")
+
+            return optimal
+
+        except Exception as e:
+            print(f"   ⚠️ Could not detect RAM: {e}, using 1 worker")
+            return 1
+
+    def filter_jobs_parallel(
+        self,
+        jobs_list: List[Dict],
+        search_terms: List[str],
+        num_workers: int = 0,
+        verbose: bool = True
+    ) -> List[Dict]:
+        """
+        Filter jobs using multiple LLM instances in parallel.
+
+        Each worker process loads its own model instance for true parallelism.
+
+        Args:
+            jobs_list: List of job dictionaries
+            search_terms: Target job roles to match
+            num_workers: Number of workers (0 = auto-detect based on RAM)
+            verbose: Print progress
+
+        Returns:
+            Filtered list of jobs that pass all criteria
+        """
+        total = len(jobs_list)
+        if total == 0:
+            return []
+
+        # Auto-detect or validate worker count based on system RAM
+        if num_workers <= 0:
+            num_workers = self._calculate_optimal_workers(4)  # Default max 4
+        else:
+            num_workers = self._calculate_optimal_workers(num_workers)
+
+        # For small job lists or single worker, use sequential processing
+        if total < num_workers * 2 or num_workers == 1:
+            print(f"   📝 Using sequential processing (jobs={total}, workers={num_workers})...")
+            return self.filter_jobs(jobs_list, search_terms, verbose)
+
+        print(f"   🚀 Starting parallel processing with {num_workers} workers...")
+        print(f"   📊 Processing {total} jobs...")
+
+        # Prepare args for workers: list of (job, search_terms) tuples
+        work_items = [(job, search_terms) for job in jobs_list]
+
+        # Calculate threads per worker (divide available threads)
+        total_threads = 8
+        threads_per_worker = max(2, total_threads // num_workers)
+
+        # Create process pool with model initialization
+        try:
+            with mp.Pool(
+                processes=num_workers,
+                initializer=_init_worker,
+                initargs=(str(self.model_path), 8192, threads_per_worker)
+            ) as pool:
+                # Process jobs in parallel
+                results = pool.map(_evaluate_job_worker, work_items)
+        except Exception as e:
+            print(f"   ❌ Parallel processing failed: {e}")
+            print(f"   🔄 Falling back to sequential processing...")
+            return self.filter_jobs(jobs_list, search_terms, verbose)
+
+        # Process results
+        filtered = []
+        excluded_keyword = 0
+        excluded_visa = 0
+        excluded_experience = 0
+        excluded_phd = 0
+        skipped = 0
+
+        for evaluation in results:
+            job = evaluation.pop('_job', None)
+            if job is None:
+                continue
+
+            if evaluation.get("skipped", False):
+                skipped += 1
+                continue
+
+            if not evaluation.get("keyword_match", False):
+                excluded_keyword += 1
+                continue
+
+            if not evaluation.get("visa_sponsorship", False):
+                excluded_visa += 1
+                continue
+
+            if not evaluation.get("entry_level", False):
+                excluded_experience += 1
+                continue
+
+            if evaluation.get("requires_phd", False):
+                excluded_phd += 1
+                continue
+
+            job['llm_evaluation'] = evaluation
+            filtered.append(job)
+
+        print(f"   Skipped {skipped} jobs (no description)")
+        print(f"   Excluded {excluded_keyword} jobs (keyword mismatch)")
+        print(f"   Excluded {excluded_visa} jobs (no visa sponsorship)")
+        print(f"   Excluded {excluded_experience} jobs (not entry-level)")
+        print(f"   Excluded {excluded_phd} jobs (PhD required)")
+        print(f"   ✅ {len(filtered)} jobs passed LLM filter (parallel)")
 
         return filtered
 

@@ -64,6 +64,7 @@ class JobHunterSentinel:
             self.results_wanted = int(os.getenv("RESULTS_WANTED", "20"))
             self.hours_old = int(os.getenv("HOURS_OLD", "24"))
             self.use_llm_filter = os.getenv("USE_LLM_FILTER", "true").lower() == "true"
+            self.llm_workers = int(os.getenv("LLM_WORKERS", "0"))  # 0 = auto-detect based on RAM
 
             # Initialize LLM filter if enabled
             self.llm_filter = None
@@ -77,6 +78,7 @@ class JobHunterSentinel:
             print(f"   Results Wanted: {self.results_wanted}")
             print(f"   Time Window: {self.hours_old} hours")
             print(f"   LLM Filter: {'Enabled' if self.use_llm_filter else 'Disabled'}")
+            print(f"   LLM Workers: {self.llm_workers if self.llm_workers > 0 else 'auto'}")
 
         except Exception as e:
             print(f"❌ Initialization failed: {e}")
@@ -217,18 +219,37 @@ class JobHunterSentinel:
 
             print(f"\n✅ Scraped {len(jobs_df)} total jobs")
 
-            # Step 2: LLM-based filtering for entry-level and H1B-friendly jobs
-            print(f"\n🤖 STEP 2: LLM filtering (entry-level & H1B)...")
+            # Step 2: Deduplication (before LLM filtering to save inference time)
+            print(f"\n🔍 STEP 2: Checking for duplicate jobs...")
             print("-" * 60)
             jobs_list = jobs_df.to_dict('records')
-            
+            new_jobs = self.database.filter_new_jobs(jobs_list)
+
+            if not new_jobs:
+                print("\n⚠️ All jobs were already sent. No new jobs to dispatch.")
+                self._print_summary(start_time, len(jobs_df), 0)
+                return
+
+            # Step 2.5: Save ALL new jobs before filtering (for data collection)
+            print(f"\n💾 Saving all {len(new_jobs)} new jobs to storage...")
+            self.data_manager.save_jobs(new_jobs, timestamp=start_time, prefix="all_jobs")
+            all_jobs_df = pd.DataFrame(new_jobs)
+            self.data_manager.save_jobs_csv(all_jobs_df, timestamp=start_time, prefix="all_jobs")
+
+            # Step 3: LLM-based filtering for entry-level and H1B-friendly jobs
+            print(f"\n🤖 STEP 3: LLM filtering (entry-level & H1B)...")
+            print("-" * 60)
+
             if self.llm_filter:
                 # Extract base search terms (without level modifiers)
                 base_terms = self._get_base_search_terms()
-                filtered_jobs = self.llm_filter.filter_jobs(jobs_list, base_terms)
+                # Use parallel filtering (auto-detects workers based on RAM if llm_workers=0)
+                filtered_jobs = self.llm_filter.filter_jobs_parallel(
+                    new_jobs, base_terms, num_workers=self.llm_workers
+                )
             else:
                 print("⚠️ LLM filter not available, using rule-based fallback...")
-                filtered_jobs = self.filter_jobs(jobs_list)
+                filtered_jobs = self.filter_jobs(new_jobs)
 
             if not filtered_jobs:
                 print("\n⚠️ No jobs passed LLM filters. Sending empty notification...")
@@ -236,30 +257,20 @@ class JobHunterSentinel:
                 self._print_summary(start_time, len(jobs_df), 0)
                 return
 
-            # Step 3: Save filtered data to local files
-            print(f"\n💾 STEP 3: Saving filtered data to local storage...")
+            # Step 4: Save filtered data to local files
+            print(f"\n💾 STEP 4: Saving filtered data to local storage...")
             print("-" * 60)
-            self.data_manager.save_jobs(filtered_jobs, timestamp=start_time)
+            self.data_manager.save_jobs(filtered_jobs, timestamp=start_time, prefix="filtered_jobs")
             filtered_df = pd.DataFrame(filtered_jobs)
-            self.data_manager.save_jobs_csv(filtered_df, timestamp=start_time)
+            self.data_manager.save_jobs_csv(filtered_df, timestamp=start_time, prefix="filtered_jobs")
 
             # Cleanup old data files (older than 7 days)
             self.data_manager.cleanup_old_files(days=7)
 
-            # Step 4: Deduplication
-            print(f"\n🔍 STEP 4: Checking for duplicate jobs...")
-            print("-" * 60)
-            new_jobs = self.database.filter_new_jobs(filtered_jobs)
-
-            if not new_jobs:
-                print("\n⚠️ All jobs were already sent. No new jobs to dispatch.")
-                self._print_summary(start_time, len(jobs_df), 0)
-                return
-
             # Step 5: Send Email
             print(f"\n📧 STEP 5: Sending email digest...")
             print("-" * 60)
-            email_sent = self.email_sender.send_daily_digest(new_jobs)
+            email_sent = self.email_sender.send_daily_digest(filtered_jobs)
 
             if not email_sent:
                 print("❌ Email dispatch failed!")
@@ -269,7 +280,7 @@ class JobHunterSentinel:
             # Step 6: Mark as sent in database
             print(f"\n💾 STEP 6: Marking jobs as sent in database...")
             print("-" * 60)
-            for job in new_jobs:
+            for job in filtered_jobs:
                 self.database.mark_as_sent(
                     job_url=job.get('job_url', ''),
                     title=job.get('title', ''),
@@ -281,7 +292,7 @@ class JobHunterSentinel:
                     }
                 )
 
-            print(f"✅ Marked {len(new_jobs)} jobs as sent")
+            print(f"✅ Marked {len(filtered_jobs)} jobs as sent")
 
             # Step 7: Show data storage statistics
             print(f"\n📊 STEP 7: Data storage statistics...")
@@ -294,7 +305,7 @@ class JobHunterSentinel:
             print(f"   Newest file: {stats['newest_file']}")
 
             # Summary
-            self._print_summary(start_time, len(jobs_df), len(new_jobs))
+            self._print_summary(start_time, len(jobs_df), len(filtered_jobs))
 
         except KeyboardInterrupt:
             print("\n\n⚠️ Process interrupted by user")
@@ -306,24 +317,8 @@ class JobHunterSentinel:
             sys.exit(1)
 
     def _get_base_search_terms(self) -> List[str]:
-        """Extract base search terms without level modifiers for LLM matching"""
-        base_terms = set()
-        level_modifiers = [
-            'entry level', 'entry-level', 'junior', 'associate', 'new grad',
-            'new graduate', 'early career', 'graduate'
-        ]
-
-        for term in self.search_terms:
-            term_lower = term.lower()
-            # Remove level modifiers to get base role
-            base_term = term_lower
-            for modifier in level_modifiers:
-                base_term = base_term.replace(modifier, '').strip()
-
-            if base_term:
-                base_terms.add(base_term)
-
-        return list(base_terms)
+        """Get search terms for LLM matching"""
+        return [term.strip() for term in self.search_terms]
 
     def _print_summary(self, start_time: datetime, scraped: int, sent: int):
         """Print execution summary"""
