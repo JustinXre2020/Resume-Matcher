@@ -32,39 +32,42 @@ class DataManager:
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(exist_ok=True)
         
-    def _get_filename(self, timestamp: Optional[datetime] = None) -> str:
+    def _get_filename(self, timestamp: Optional[datetime] = None, prefix: str = "jobs") -> str:
         """
         Generate filename for job data
-        
+
         Args:
             timestamp: Datetime for filename, defaults to now
-            
+            prefix: Filename prefix (e.g., 'jobs', 'all_jobs', 'filtered_jobs')
+
         Returns:
             Filename string like 'jobs_2026-01-18_08-00.json'
         """
         if timestamp is None:
             timestamp = datetime.now()
-        return f"jobs_{timestamp.strftime('%Y-%m-%d_%H-%M')}.json"
+        return f"{prefix}_{timestamp.strftime('%Y-%m-%d_%H-%M')}.json"
     
     def save_jobs(
         self,
         jobs_data: List[Dict],
-        timestamp: Optional[datetime] = None
+        timestamp: Optional[datetime] = None,
+        prefix: str = "jobs"
     ) -> str:
         """
         Save job data to JSON file
-        
+
         Args:
             jobs_data: List of job dictionaries
             timestamp: Timestamp for the file
-            
+            prefix: Filename prefix (e.g., 'jobs', 'all_jobs')
+
         Returns:
             Path to saved file
         """
         if timestamp is None:
             timestamp = datetime.now()
-        
-        filename = self._get_filename(timestamp)
+
+        filename = self._get_filename(timestamp, prefix)
         filepath = self.data_dir / filename
         
         # Prepare data for saving
@@ -84,22 +87,24 @@ class DataManager:
     def save_jobs_csv(
         self,
         jobs_df: pd.DataFrame,
-        timestamp: Optional[datetime] = None
+        timestamp: Optional[datetime] = None,
+        prefix: str = "jobs"
     ) -> str:
         """
         Save job data to CSV file
-        
+
         Args:
             jobs_df: DataFrame with job data
             timestamp: Timestamp for the file
-            
+            prefix: Filename prefix (e.g., 'jobs', 'all_jobs')
+
         Returns:
             Path to saved file
         """
         if timestamp is None:
             timestamp = datetime.now()
-        
-        filename = self._get_filename(timestamp).replace('.json', '.csv')
+
+        filename = self._get_filename(timestamp, prefix).replace('.json', '.csv')
         filepath = self.data_dir / filename
         
         # Save as CSV
