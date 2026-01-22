@@ -64,9 +64,10 @@ Evaluate:
 2. visa_sponsorship: Does it mention H1B, visa sponsorship, or NOT explicitly reject sponsorship? (true/false)
 3. entry_level: Is this entry-level (0-1 years experience required or doesn't mention experience at all)? Check for "entry", "junior", "associate", "new grad", or the requireed years of experience is less than/equal to 1.(true/false)
 4. requires_phd: Does it require a PhD or doctorate? (true/false)
+5. is_internship: Is this an internship position? Look for keywords like "intern", "internship", "co-op", or "summer program". (true/false)
 
 Respond ONLY with valid JSON:
-{{"keyword_match": true/false, "visa_sponsorship": true/false, "entry_level": true/false, "requires_phd": true/false, "reason": "brief explanation"}}"""
+{{"keyword_match": true/false, "visa_sponsorship": true/false, "entry_level": true/false, "requires_phd": true/false, "is_internship": true/false, "reason": "brief explanation"}}"""
 
     return prompt
 
@@ -86,6 +87,7 @@ def _parse_response_worker(response_text: str) -> Dict:
                 "visa_sponsorship": result.get("visa_sponsorship", True),
                 "entry_level": result.get("entry_level", True),
                 "requires_phd": result.get("requires_phd", False),
+                "is_internship": result.get("is_internship", False),
                 "reason": result.get("reason", "")
             }
         else:
@@ -95,6 +97,7 @@ def _parse_response_worker(response_text: str) -> Dict:
                 "visa_sponsorship": "visa_sponsorship\": true" in response_lower,
                 "entry_level": "entry_level\": true" in response_lower,
                 "requires_phd": "requires_phd\": true" in response_lower,
+                "is_internship": "is_internship\": true" in response_lower,
                 "reason": "Parsed from text response"
             }
 
@@ -104,6 +107,7 @@ def _parse_response_worker(response_text: str) -> Dict:
             "visa_sponsorship": True,
             "entry_level": True,
             "requires_phd": False,
+            "is_internship": False,
             "reason": "JSON parse error - defaulting to pass"
         }
 
@@ -129,6 +133,7 @@ def _evaluate_job_worker(args: Tuple[Dict, List[str]]) -> Dict:
                 "visa_sponsorship": False,
                 "entry_level": False,
                 "requires_phd": False,
+                "is_internship": False,
                 "reason": "No description available - skipped",
                 "skipped": True,
                 "job_title": job.get('title', 'Unknown'),
@@ -165,6 +170,7 @@ def _evaluate_job_worker(args: Tuple[Dict, List[str]]) -> Dict:
             "visa_sponsorship": True,
             "entry_level": True,
             "requires_phd": False,
+            "is_internship": False,
             "reason": f"LLM error: {str(e)[:50]}",
             "error": True,
             "job_title": job.get('title', 'Unknown'),
@@ -247,12 +253,6 @@ class LocalLLMFilter:
         company = self._safe_str(job.get('company'), 'Unknown')
         location = self._safe_str(job.get('location'), 'Unknown')
         description = self._safe_str(job.get('description'), '')
-
-        # Truncate description to ~4000 chars (~1000 tokens) to fit in context
-        # This leaves room for prompt template and response
-        # if len(description) > 4000:
-        #     description = description[:4000] + "..."
-
         search_terms_str = ", ".join(search_terms)
 
         prompt = f"""Analyze this job posting and answer with JSON only.
@@ -265,13 +265,15 @@ Description: {description}
 Target Roles: {search_terms_str}
 
 Evaluate:
-1. keyword_match: Does the job title/description match any target roles? (true/false)
+1. keyword_match: Does the job title/description match any target roles? That is, does one of the target roles, which are separated by a comma, exist in the job title/description? (true/false)
 2. visa_sponsorship: Does it mention H1B, visa sponsorship, or NOT explicitly reject sponsorship? (true/false)
-3. entry_level: Is this entry-level (0-3 years experience required)? Check for "entry", "junior", "associate", "new grad", or 0-3 years. (true/false)
+3. entry_level: Is this entry-level (0-3 years experience required)? keywords including "entry", "junior", "associate", "new grad", or "0-3 years of experience" should be true. keywords like
+    senior, mid-level, Sr., staff, principal should be considered false. (true/false)
 4. requires_phd: Does it require a PhD or doctorate? (true/false)
+5. is_internship: Is this an internship position? Look for keywords like "intern", "internship", "co-op", or "summer program". (true/false)
 
 Respond ONLY with valid JSON:
-{{"keyword_match": true/false, "visa_sponsorship": true/false, "entry_level": true/false, "requires_phd": true/false, "reason": "brief explanation"}}"""
+{{"keyword_match": true/false, "visa_sponsorship": true/false, "entry_level": true/false, "requires_phd": true/false, "is_internship": true/false, "reason": "brief explanation"}}"""
 
         return prompt
 
@@ -297,6 +299,7 @@ Respond ONLY with valid JSON:
                     "visa_sponsorship": False,
                     "entry_level": False,
                     "requires_phd": False,
+                    "is_internship": False,
                     "reason": "No description available - skipped",
                     "skipped": True
                 }
@@ -371,6 +374,7 @@ Respond ONLY with valid JSON:
                 "visa_sponsorship": True,
                 "entry_level": True,
                 "requires_phd": False,
+                "is_internship": False,
                 "reason": f"LLM error: {str(e)[:50]}",
                 "error": True
             }
@@ -392,6 +396,7 @@ Respond ONLY with valid JSON:
                     "visa_sponsorship": result.get("visa_sponsorship", True),
                     "entry_level": result.get("entry_level", True),
                     "requires_phd": result.get("requires_phd", False),
+                    "is_internship": result.get("is_internship", False),
                     "reason": result.get("reason", "")
                 }
             else:
@@ -402,6 +407,7 @@ Respond ONLY with valid JSON:
                     "visa_sponsorship": "visa_sponsorship\": true" in response_lower or "no sponsor" not in response_lower,
                     "entry_level": "entry_level\": true" in response_lower,
                     "requires_phd": "requires_phd\": true" in response_lower,
+                    "is_internship": "is_internship\": true" in response_lower,
                     "reason": "Parsed from text response"
                 }
 
@@ -412,6 +418,7 @@ Respond ONLY with valid JSON:
                 "visa_sponsorship": True,
                 "entry_level": True,
                 "requires_phd": False,
+                "is_internship": False,
                 "reason": "JSON parse error - defaulting to pass"
             }
 
@@ -421,7 +428,8 @@ Respond ONLY with valid JSON:
             evaluation.get("keyword_match", False) and
             evaluation.get("visa_sponsorship", False) and
             evaluation.get("entry_level", False) and
-            not evaluation.get("requires_phd", True)
+            not evaluation.get("requires_phd", True) and
+            not evaluation.get("is_internship", True)
         )
 
     def filter_jobs(
@@ -446,6 +454,7 @@ Respond ONLY with valid JSON:
         excluded_visa = 0
         excluded_experience = 0
         excluded_phd = 0
+        excluded_internship = 0
         skipped = 0
 
         total = len(jobs_list)
@@ -477,6 +486,10 @@ Respond ONLY with valid JSON:
                 excluded_phd += 1
                 continue
 
+            if evaluation.get("is_internship", False):
+                excluded_internship += 1
+                continue
+
             # Job passed all filters
             job['llm_evaluation'] = evaluation
             filtered.append(job)
@@ -486,6 +499,7 @@ Respond ONLY with valid JSON:
         print(f"   Excluded {excluded_visa} jobs (no visa sponsorship)")
         print(f"   Excluded {excluded_experience} jobs (not entry-level)")
         print(f"   Excluded {excluded_phd} jobs (PhD required)")
+        print(f"   Excluded {excluded_internship} jobs (internship)")
         print(f"   ✅ {len(filtered)} jobs passed LLM filter")
 
         return filtered
@@ -596,6 +610,7 @@ Respond ONLY with valid JSON:
         excluded_visa = 0
         excluded_experience = 0
         excluded_phd = 0
+        excluded_internship = 0
         skipped = 0
 
         for evaluation in results:
@@ -623,6 +638,10 @@ Respond ONLY with valid JSON:
                 excluded_phd += 1
                 continue
 
+            if evaluation.get("is_internship", False):
+                excluded_internship += 1
+                continue
+
             job['llm_evaluation'] = evaluation
             filtered.append(job)
 
@@ -631,6 +650,7 @@ Respond ONLY with valid JSON:
         print(f"   Excluded {excluded_visa} jobs (no visa sponsorship)")
         print(f"   Excluded {excluded_experience} jobs (not entry-level)")
         print(f"   Excluded {excluded_phd} jobs (PhD required)")
+        print(f"   Excluded {excluded_internship} jobs (internship)")
         print(f"   ✅ {len(filtered)} jobs passed LLM filter (parallel)")
 
         return filtered
