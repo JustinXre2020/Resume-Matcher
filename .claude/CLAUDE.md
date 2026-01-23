@@ -1,6 +1,8 @@
-# CLAUDE.md - Resume Matcher
+# CLAUDE.md
 
-> **Context file for Claude Code.** Full documentation at [docs/agent/README.md](../docs/agent/README.md).
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+Full documentation at [docs/agent/README.md](../docs/agent/README.md).
 
 ---
 
@@ -31,22 +33,17 @@ Resume Matcher is an AI-powered application for tailoring resumes to job descrip
 ## Essential Commands
 
 ```bash
-# Install all dependencies
-npm run install
+# Backend (from apps/backend/)
+uv sync                                              # Install Python dependencies
+uv run uvicorn app.main:app --reload --port 8000     # Start dev server
+uv run pytest                                        # Run tests
 
-# Development (both servers)
-npm run dev
-
-# Individual servers
-npm run dev:backend   # FastAPI on :8000
-npm run dev:frontend  # Next.js on :3000
-
-# Quality checks
-npm run lint          # Lint frontend
-npm run format        # Format with Prettier
-
-# Build
-npm run build
+# Frontend (from apps/frontend/)
+npm install          # Install Node.js dependencies
+npm run dev          # Start dev server on :3000
+npm run lint         # ESLint check
+npm run format       # Prettier format
+npm run build        # Production build
 ```
 
 ---
@@ -130,6 +127,21 @@ data = copy.deepcopy(DEFAULT_DATA)  # Correct
 # data = DEFAULT_DATA  # Wrong - shared state bug
 ```
 
+### Race Conditions (Python)
+Use `asyncio.Lock()` for shared resource initialization:
+```python
+_lock = asyncio.Lock()
+async with _lock:
+    # Initialize shared resource
+```
+
+### LLM API Key Handling
+Pass API keys directly to `litellm.acompletion()`, not via `os.environ`:
+```python
+await litellm.acompletion(model=model, messages=messages, api_key=api_key)
+# NOT: os.environ["OPENAI_API_KEY"] = key  # Race condition in async
+```
+
 ---
 
 ## Design System Quick Reference
@@ -149,12 +161,24 @@ data = copy.deepcopy(DEFAULT_DATA)  # Correct
 
 ---
 
+## Architecture Overview
+
+**Data Flow**: Frontend → REST API → Backend Services → LiteLLM → AI Provider
+
+**Key Integration Points**:
+- `apps/backend/app/llm.py` - LiteLLM wrapper with JSON mode, retry logic, and bracket-matching JSON extraction
+- `apps/backend/app/services/improver.py` - Resume improvement logic (mirror this pattern for new services)
+- `apps/frontend/lib/api/` - API client layer
+- `apps/frontend/lib/utils/section-helpers.ts` - Section ordering/visibility utilities
+
+**Custom Sections System**: Resumes support dynamic sections with types: `personalInfo`, `text`, `itemList`, `stringList`. Section metadata (`sectionMeta`) controls order, names, and visibility.
+
 ## Definition of Done
 
 Before completing a task:
 
 - [ ] Code compiles without errors
-- [ ] `npm run lint` passes
+- [ ] `npm run lint` passes (frontend changes)
 - [ ] UI changes follow Swiss International Style
 - [ ] Python functions have type hints
 - [ ] Schema/prompt changes documented

@@ -272,16 +272,24 @@ def should_include_job(evaluation: Dict) -> bool:
 class OpenRouterLLMFilter:
     """Filter jobs using OpenRouter API with async inference"""
 
-    def __init__(self, model: str = OPENROUTER_MODEL, concurrency: int = 10):
+    def __init__(self, model: str = OPENROUTER_MODEL, concurrency: int = 10, rate_limit_delay: float = 0):
         """
         Initialize the OpenRouter LLM filter.
 
         Args:
             model: OpenRouter model identifier
             concurrency: Maximum concurrent API calls
+            rate_limit_delay: Delay between requests in seconds (auto-set for free models)
         """
         self.model = model
-        self.concurrency = concurrency
+        # Auto-detect free model and apply rate limiting (20 req/min limit, target 19/min = 3.16s delay)
+        self.is_free_model = ":free" in model.lower()
+        if self.is_free_model:
+            self.concurrency = 1  # Force sequential for free models
+            self.rate_limit_delay = rate_limit_delay if rate_limit_delay > 0 else 3.2
+        else:
+            self.concurrency = concurrency
+            self.rate_limit_delay = rate_limit_delay
 
         if not OPENROUTER_API_KEY:
             raise ValueError("OPENROUTER_API_KEY environment variable not set")
@@ -289,6 +297,8 @@ class OpenRouterLLMFilter:
         print(f"🤖 OpenRouter LLM Filter initialized")
         print(f"   Model: {self.model}")
         print(f"   Concurrency: {self.concurrency}")
+        if self.is_free_model:
+            print(f"   ⚠️  Free model detected - rate limited (~19 req/min)")
 
     async def evaluate_job(
         self,
@@ -329,6 +339,9 @@ class OpenRouterLLMFilter:
         async def evaluate_with_semaphore(job: Dict, session: aiohttp.ClientSession) -> tuple[Dict, Dict]:
             async with semaphore:
                 result = await self.evaluate_job(job, search_terms, session)
+                # Rate limit delay for free models
+                if self.rate_limit_delay > 0:
+                    await asyncio.sleep(self.rate_limit_delay)
                 return job, result
 
         # Use a single session for all requests (connection pooling)
