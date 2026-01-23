@@ -14,7 +14,7 @@ from scraper import JobScraper
 from database import JobDatabase
 from email_sender import EmailSender
 from data_manager import DataManager
-from llm_filter import LocalLLMFilter
+from llm_filter import OpenRouterLLMFilter
 
 load_dotenv()
 
@@ -69,8 +69,8 @@ class JobHunterSentinel:
             # Initialize LLM filter if enabled
             self.llm_filter = None
             if self.use_llm_filter:
-                print("🤖 Initializing Local LLM Filter...")
-                self.llm_filter = LocalLLMFilter()
+                print("🤖 Initializing OpenRouter LLM Filter...")
+                self.llm_filter = OpenRouterLLMFilter()
 
             print(f"✅ Configuration loaded:")
             print(f"   Search Terms: {self.search_terms}")
