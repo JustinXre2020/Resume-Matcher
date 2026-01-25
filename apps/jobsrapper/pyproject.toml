@@ -19,11 +19,7 @@ dependencies = [
     "psutil>=5.9.0",
     "llama-cpp-python>=0.2.0",
     "huggingface-hub>=0.20.0",
-<<<<<<< Updated upstream
-    "aiohttp>=3.9.0",
-=======
     "aiohttp>=3.9.0"
->>>>>>> Stashed changes
 ]
 
 [project.optional-dependencies]
