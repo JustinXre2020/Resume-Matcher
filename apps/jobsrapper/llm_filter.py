@@ -334,22 +334,23 @@ class OpenRouterLLMFilter:
         print(f"   📊 Processing {total} jobs...")
 
         results = []
-        idx = 0
         completed = 0
         # Use a single session for all requests (connection pooling)
         async with aiohttp.ClientSession() as session:
-            jobs = jobs_list[idx: idx + self.concurrency]
+            for batch_idx in range(0, total, self.concurrency):
+                jobs = jobs_list[batch_idx: batch_idx + self.concurrency]
 
-            async with asyncio.TaskGroup() as tg:
-                tasks = [(job, tg.create_task(self.evaluate_job(job, search_terms, session))) for job in jobs]
-            results = [(job, task_future.result()) for job, task_future in tasks]
-            completed += self.concurrency
-
-            if verbose:
-                print(f"   🤖 Evaluated {min(completed, total)}/{total}...")
-            idx += self.concurrency
-            if idx < len(jobs):
+                async with asyncio.TaskGroup() as tg:
+                    tasks = [(job, tg.create_task(self.evaluate_job(job, search_terms, session))) for job in jobs]
+                # wait 60s for rate limiting and the futures finish
                 await asyncio.sleep(self.rate_limit_delay)
+                results += [(job, task_future.result()) for job, task_future in tasks]
+                completed += self.concurrency
+
+                if verbose:
+                    print(f"   🤖 Evaluated {min(completed, total)}/{total}...")
+                batch_idx += self.concurrency
+
 
         # Process results
         filtered = []
