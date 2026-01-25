@@ -272,7 +272,7 @@ def should_include_job(evaluation: Dict) -> bool:
 class OpenRouterLLMFilter:
     """Filter jobs using OpenRouter API with async inference"""
 
-    def __init__(self, model: str = OPENROUTER_MODEL, concurrency: int = 10, rate_limit_delay: float = 0):
+    def __init__(self, model: str = OPENROUTER_MODEL, concurrency: int = 20, rate_limit_delay: float = 60):
         """
         Initialize the OpenRouter LLM filter.
 
@@ -284,12 +284,12 @@ class OpenRouterLLMFilter:
         self.model = model
         # Auto-detect free model and apply rate limiting (20 req/min limit, target 19/min = 3.16s delay)
         self.is_free_model = ":free" in model.lower()
-        if self.is_free_model:
-            self.concurrency = 1  # Force sequential for free models
-            self.rate_limit_delay = rate_limit_delay if rate_limit_delay > 0 else 3.2
-        else:
-            self.concurrency = concurrency
-            self.rate_limit_delay = rate_limit_delay
+        # if self.is_free_model:
+        #     self.concurrency = 1  # Force sequential for free models
+        #     self.rate_limit_delay = rate_limit_delay if rate_limit_delay > 0 else 3.2
+        # else:
+        self.concurrency = concurrency
+        self.rate_limit_delay = rate_limit_delay
 
         if not OPENROUTER_API_KEY:
             raise ValueError("OPENROUTER_API_KEY environment variable not set")
@@ -333,32 +333,23 @@ class OpenRouterLLMFilter:
         print(f"   🚀 Starting async filtering with concurrency={self.concurrency}...")
         print(f"   📊 Processing {total} jobs...")
 
-        # Semaphore to limit concurrency
-        semaphore = asyncio.Semaphore(self.concurrency)
-
-        async def evaluate_with_semaphore(job: Dict, session: aiohttp.ClientSession) -> tuple[Dict, Dict]:
-            async with semaphore:
-                result = await self.evaluate_job(job, search_terms, session)
-                # Rate limit delay for free models
-                if self.rate_limit_delay > 0:
-                    await asyncio.sleep(self.rate_limit_delay)
-                return job, result
-
+        results = []
+        idx = 0
+        completed = 0
         # Use a single session for all requests (connection pooling)
         async with aiohttp.ClientSession() as session:
-            tasks = [evaluate_with_semaphore(job, session) for job in jobs_list]
+            jobs = jobs_list[idx: idx + self.concurrency]
 
-            # Process with progress tracking
-            results = []
-            completed = 0
+            async with asyncio.TaskGroup() as tg:
+                tasks = [(job, tg.create_task(self.evaluate_job(job, search_terms, session))) for job in jobs]
+            results = [(job, task_future.result()) for job, task_future in tasks]
+            completed += self.concurrency
 
-            for coro in asyncio.as_completed(tasks):
-                job, evaluation = await coro
-                results.append((job, evaluation))
-                completed += 1
-
-                if verbose and completed % 10 == 0:
-                    print(f"   🤖 Evaluated {completed}/{total}...")
+            if verbose:
+                print(f"   🤖 Evaluated {min(completed, total)}/{total}...")
+            idx += self.concurrency
+            if idx < len(jobs):
+                await asyncio.sleep(self.rate_limit_delay)
 
         # Process results
         filtered = []
