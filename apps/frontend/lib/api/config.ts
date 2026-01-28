@@ -37,7 +37,13 @@ export interface LLMHealthCheck {
   provider: string;
   model: string;
   error?: string;
+  error_code?: string;
   response_model?: string;
+  warning?: string;
+  warning_code?: string;
+  test_prompt?: string;
+  model_output?: string;
+  error_detail?: string;
 }
 
 // Fetch full LLM configuration
@@ -170,7 +176,7 @@ export async function updateFeatureConfig(config: FeatureConfigUpdate): Promise<
 }
 
 // Language configuration types
-export type SupportedLanguage = 'en' | 'es' | 'zh' | 'ja';
+export type SupportedLanguage = 'en' | 'es' | 'zh' | 'ja' | 'pt';
 
 export interface LanguageConfig {
   ui_language: SupportedLanguage;
