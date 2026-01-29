@@ -259,10 +259,16 @@ async def evaluate_job_async(
 
 
 def should_include_job(evaluation: Dict) -> bool:
-    """Determine if job should be included based on evaluation"""
+    """
+    Determine if job should be included based on evaluation.
+
+    Note: visa_sponsorship is NOT filtered here - it's recorded in llm_evaluation
+    for per-recipient filtering later. Recipients with needs_sponsorship=True
+    will have jobs filtered by visa_sponsorship in email_sender.
+    """
     return (
         evaluation.get("keyword_match", False) and
-        evaluation.get("visa_sponsorship", False) and
+        # visa_sponsorship removed - tracked but not filtered globally
         evaluation.get("entry_level", False) and
         not evaluation.get("requires_phd", True) and
         not evaluation.get("is_internship", True)
@@ -355,11 +361,11 @@ class OpenRouterLLMFilter:
         # Process results
         filtered = []
         excluded_keyword = 0
-        excluded_visa = 0
         excluded_experience = 0
         excluded_phd = 0
         excluded_internship = 0
         skipped = 0
+        no_visa_count = 0  # Track for stats, but don't filter
 
         for job, evaluation in results:
             if evaluation.get("skipped", False):
@@ -370,9 +376,10 @@ class OpenRouterLLMFilter:
                 excluded_keyword += 1
                 continue
 
+            # Track visa sponsorship status but don't filter
+            # (filtering happens per-recipient in email_sender)
             if not evaluation.get("visa_sponsorship", False):
-                excluded_visa += 1
-                continue
+                no_visa_count += 1
 
             if not evaluation.get("entry_level", False):
                 excluded_experience += 1
@@ -392,10 +399,10 @@ class OpenRouterLLMFilter:
 
         print(f"   Skipped {skipped} jobs (no description)")
         print(f"   Excluded {excluded_keyword} jobs (keyword mismatch)")
-        print(f"   Excluded {excluded_visa} jobs (no visa sponsorship)")
         print(f"   Excluded {excluded_experience} jobs (not entry-level)")
         print(f"   Excluded {excluded_phd} jobs (PhD required)")
         print(f"   Excluded {excluded_internship} jobs (internship)")
+        print(f"   Tracked {no_visa_count} jobs without visa sponsorship (not filtered)")
         print(f"   ✅ {len(filtered)} jobs passed LLM filter (async)")
 
         return filtered

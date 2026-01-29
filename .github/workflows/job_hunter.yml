@@ -1,12 +1,11 @@
 name: Job Hunter Sentinel - Scheduled Runs
 
 on:
-  # Multiple daily schedules: 8 AM, 2 PM, 8 PM Eastern Standard Time (EST/UTC-5)
-  # Each run searches for jobs posted in the last 6 hours
+  # Twice daily: 12 PM and 9 PM Eastern Standard Time (EST/UTC-5)
+  # Each run searches for jobs posted in the last 9 hours
   schedule:
-    - cron: '0 13 * * *'  # 8:00 AM EST (UTC 13:00)
-    - cron: '0 19 * * *'  # 2:00 PM EST (UTC 19:00)
-    - cron: '0 1 * * *'   # 8:00 PM EST (UTC 01:00 next day)
+    - cron: '0 17 * * *'  # 12:00 PM EST (UTC 17:00)
+    - cron: '0 2 * * *'   # 9:00 PM EST (UTC 02:00 next day)
   
   # Allow manual trigger
   workflow_dispatch:
@@ -39,14 +38,15 @@ jobs:
         working-directory: apps/jobsrapper
         env:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
-          RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
+          RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}  # Legacy fallback
+          RECIPIENTS: ${{ secrets.RECIPIENTS }}  # Multi-recipient JSON config
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           OPENROUTER_MODEL: ${{ secrets.OPENROUTER_MODEL }}
-          SEARCH_TERMS: ${{ vars.SEARCH_TERMS }}
+          SEARCH_TERMS: ${{ vars.SEARCH_TERMS }}  # Legacy fallback for single recipient
           LOCATIONS: ${{ vars.LOCATIONS }}
           RESULTS_WANTED: ${{ vars.RESULTS_WANTED }}
-          HOURS_OLD: ${{ vars.HOURS_OLD }}
+          HOURS_OLD: ${{ vars.HOURS_OLD }}  # Search jobs from last 9 hours
           USE_LLM_FILTER: ${{ vars.USE_LLM_FILTER }}
           SITES: ${{ vars.SITES }}
         run: |
