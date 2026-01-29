@@ -4,11 +4,14 @@ Handles saving, loading, and cleanup of scraped job data
 """
 import os
 import json
+import logging
 import pandas as pd
 from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import List, Dict, Optional
 import glob
+
+logger = logging.getLogger(__name__)
 
 
 class DateTimeEncoder(json.JSONEncoder):
@@ -81,7 +84,7 @@ class DataManager:
         with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(data_to_save, f, indent=2, ensure_ascii=False, cls=DateTimeEncoder)
         
-        print(f"💾 Saved {len(jobs_data)} jobs to {filepath}")
+        logger.info(f"💾 Saved {len(jobs_data)} jobs to {filepath}")
         return str(filepath)
     
     def save_jobs_csv(
@@ -110,7 +113,7 @@ class DataManager:
         # Save as CSV
         jobs_df.to_csv(filepath, index=False, encoding='utf-8')
         
-        print(f"💾 Saved {len(jobs_df)} jobs to {filepath}")
+        logger.info(f"💾 Saved {len(jobs_df)} jobs to {filepath}")
         return str(filepath)
     
     def load_jobs(self, filename: str) -> Dict:
@@ -131,7 +134,7 @@ class DataManager:
         with open(filepath, 'r', encoding='utf-8') as f:
             data = json.load(f)
         
-        print(f"📂 Loaded {data.get('count', 0)} jobs from {filepath}")
+        logger.info(f"📂 Loaded {data.get('count', 0)} jobs from {filepath}")
         return data
     
     def list_data_files(self, extension: str = "json", prefix: Optional[str] = None) -> List[Path]:
@@ -188,17 +191,17 @@ class DataManager:
 
                     if file_date < cutoff_date:
                         filepath.unlink()
-                        print(f"🗑️  Deleted old file: {filepath.name}")
+                        logger.info(f"🗑️  Deleted old file: {filepath.name}")
                         deleted_count += 1
 
                 except (ValueError, IndexError):
-                    print(f"⚠️  Skipping file with invalid name: {filepath.name}")
+                    logger.warning(f"⚠️  Skipping file with invalid name: {filepath.name}")
                     continue
 
         if deleted_count > 0:
-            print(f"✅ Cleaned up {deleted_count} old files (older than {days} days)")
+            logger.info(f"✅ Cleaned up {deleted_count} old files (older than {days} days)")
         else:
-            print(f"✅ No old files to clean up")
+            logger.info("✅ No old files to clean up")
 
         return deleted_count
     
@@ -263,11 +266,11 @@ class DataManager:
                 
                 all_jobs.extend(jobs)
             except Exception as e:
-                print(f"⚠️  Error loading {filepath.name}: {e}")
+                logger.warning(f"⚠️  Error loading {filepath.name}: {e}")
                 continue
         
         if not all_jobs:
-            print("⚠️  No jobs to merge")
+            logger.warning("⚠️  No jobs to merge")
             return None
         
         # Create DataFrame and remove duplicates
@@ -278,7 +281,7 @@ class DataManager:
         output_path = self.data_dir / output_file
         df.to_csv(output_path, index=False, encoding='utf-8')
         
-        print(f"📊 Merged {len(df)} unique jobs into {output_path}")
+        logger.info(f"📊 Merged {len(df)} unique jobs into {output_path}")
         return str(output_path)
 
 

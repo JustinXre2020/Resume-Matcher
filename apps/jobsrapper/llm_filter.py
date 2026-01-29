@@ -118,6 +118,7 @@ async def _call_openrouter(
     temperature: float = 0.1,
     max_tokens: int = 256,
     session: Optional[aiohttp.ClientSession] = None,
+    job_context: Optional[str] = None,
 ) -> str:
     """
     Make an async call to OpenRouter API.
@@ -128,6 +129,7 @@ async def _call_openrouter(
         temperature: Sampling temperature (0-1).
         max_tokens: Maximum tokens in response.
         session: Optional aiohttp session for connection reuse.
+        job_context: Optional job identifier for logging (e.g., "Job Title @ Company").
 
     Returns:
         The assistant's response content.
@@ -152,6 +154,11 @@ async def _call_openrouter(
         "max_tokens": max_tokens,
     }
 
+    # Log the prompt being sent
+    context_str = f" [{job_context}]" if job_context else ""
+    user_prompt = next((m['content'] for m in messages if m['role'] == 'user'), '')
+    logger.debug(f"LLM_PROMPT{context_str}:\n{'-'*60}\n{user_prompt}\n{'-'*60}")
+
     should_close = False
     if session is None:
         session = aiohttp.ClientSession()
@@ -166,17 +173,22 @@ async def _call_openrouter(
         ) as response:
             if response.status != 200:
                 error_text = await response.text()
-                logger.error(f"OpenRouter API error: {response.status} - {error_text}")
+                logger.error(f"OpenRouter API error{context_str}: {response.status} - {error_text}")
                 raise OpenRouterError(f"API request failed with status {response.status}")
 
             data = await response.json()
-            return data["choices"][0]["message"]["content"]
+            response_content = data["choices"][0]["message"]["content"]
+
+            # Log the response received
+            logger.debug(f"LLM_RESPONSE{context_str}:\n{'-'*60}\n{response_content}\n{'-'*60}")
+
+            return response_content
 
     except aiohttp.ClientError as e:
-        logger.error(f"OpenRouter connection error: {e}")
+        logger.error(f"OpenRouter connection error{context_str}: {e}")
         raise OpenRouterError(f"Connection error: {e}") from e
     except (KeyError, IndexError) as e:
-        logger.error(f"OpenRouter response parsing error: {e}")
+        logger.error(f"OpenRouter response parsing error{context_str}: {e}")
         raise OpenRouterError(f"Invalid response format: {e}") from e
     finally:
         if should_close:
@@ -199,10 +211,15 @@ async def evaluate_job_async(
     Returns:
         Evaluation result with pass/fail and reasons
     """
+    job_title = job.get('title', 'Unknown')
+    company = job.get('company', 'Unknown')
+    job_context = f"{job_title} @ {company}"
+
     try:
         # Skip jobs with no description
         desc = _safe_str(job.get('description'), '')
         if not desc or len(desc) < 50:
+            logger.debug(f"SKIPPED [{job_context}]: No description (length={len(desc)})")
             return {
                 "keyword_match": False,
                 "visa_sponsorship": False,
@@ -211,8 +228,8 @@ async def evaluate_job_async(
                 "is_internship": False,
                 "reason": "No description available - skipped",
                 "skipped": True,
-                "job_title": job.get('title', 'Unknown'),
-                "company": job.get('company', 'Unknown'),
+                "job_title": job_title,
+                "company": company,
             }
 
         prompt = _create_prompt(job, search_terms)
@@ -222,15 +239,26 @@ async def evaluate_job_async(
             {"role": "user", "content": prompt}
         ]
 
-        response_text = await _call_openrouter(messages, session=session)
+        response_text = await _call_openrouter(messages, session=session, job_context=job_context)
         result = _parse_response(response_text)
-        result['job_title'] = job.get('title', 'Unknown')
-        result['company'] = job.get('company', 'Unknown')
+        result['job_title'] = job_title
+        result['company'] = company
+
+        # Log the evaluation result
+        logger.info(
+            f"EVALUATED [{job_context}]: "
+            f"keyword={result.get('keyword_match')}, "
+            f"visa={result.get('visa_sponsorship')}, "
+            f"entry={result.get('entry_level')}, "
+            f"phd={result.get('requires_phd')}, "
+            f"intern={result.get('is_internship')} | "
+            f"{result.get('reason', '')[:80]}"
+        )
 
         return result
 
     except OpenRouterError as e:
-        logger.warning(f"OpenRouter error for {job.get('title', 'Unknown')}: {e}")
+        logger.warning(f"OpenRouter error [{job_context}]: {e}")
         # Default to pass on error
         return {
             "keyword_match": True,
@@ -240,11 +268,11 @@ async def evaluate_job_async(
             "is_internship": False,
             "reason": f"API error: {str(e)[:50]}",
             "error": True,
-            "job_title": job.get('title', 'Unknown'),
-            "company": job.get('company', 'Unknown'),
+            "job_title": job_title,
+            "company": company,
         }
     except Exception as e:
-        logger.error(f"Unexpected error evaluating job: {e}")
+        logger.error(f"Unexpected error evaluating job [{job_context}]: {e}", exc_info=True)
         return {
             "keyword_match": True,
             "visa_sponsorship": True,
@@ -253,8 +281,8 @@ async def evaluate_job_async(
             "is_internship": False,
             "reason": f"Error: {str(e)[:50]}",
             "error": True,
-            "job_title": job.get('title', 'Unknown'),
-            "company": job.get('company', 'Unknown'),
+            "job_title": job_title,
+            "company": company,
         }
 
 
@@ -300,11 +328,11 @@ class OpenRouterLLMFilter:
         if not OPENROUTER_API_KEY:
             raise ValueError("OPENROUTER_API_KEY environment variable not set")
 
-        print(f"🤖 OpenRouter LLM Filter initialized")
-        print(f"   Model: {self.model}")
-        print(f"   Concurrency: {self.concurrency}")
+        logger.info("🤖 OpenRouter LLM Filter initialized")
+        logger.info(f"   Model: {self.model}")
+        logger.info(f"   Concurrency: {self.concurrency}")
         if self.is_free_model:
-            print(f"   ⚠️  Free model detected - rate limited (~19 req/min)")
+            logger.warning("   ⚠️  Free model detected - rate limited (~19 req/min)")
 
     async def evaluate_job(
         self,
@@ -336,8 +364,8 @@ class OpenRouterLLMFilter:
         if total == 0:
             return []
 
-        print(f"   🚀 Starting async filtering with concurrency={self.concurrency}...")
-        print(f"   📊 Processing {total} jobs...")
+        logger.info(f"   🚀 Starting async filtering with concurrency={self.concurrency}...")
+        logger.info(f"   📊 Processing {total} jobs...")
 
         results = []
         completed = 0
@@ -354,7 +382,7 @@ class OpenRouterLLMFilter:
                 completed += self.concurrency
 
                 if verbose:
-                    print(f"   🤖 Evaluated {min(completed, total)}/{total}...")
+                    logger.info(f"   🤖 Evaluated {min(completed, total)}/{total}...")
                 batch_idx += self.concurrency
 
 
@@ -397,13 +425,13 @@ class OpenRouterLLMFilter:
             job['llm_evaluation'] = evaluation
             filtered.append(job)
 
-        print(f"   Skipped {skipped} jobs (no description)")
-        print(f"   Excluded {excluded_keyword} jobs (keyword mismatch)")
-        print(f"   Excluded {excluded_experience} jobs (not entry-level)")
-        print(f"   Excluded {excluded_phd} jobs (PhD required)")
-        print(f"   Excluded {excluded_internship} jobs (internship)")
-        print(f"   Tracked {no_visa_count} jobs without visa sponsorship (not filtered)")
-        print(f"   ✅ {len(filtered)} jobs passed LLM filter (async)")
+        logger.info(f"   Skipped {skipped} jobs (no description)")
+        logger.info(f"   Excluded {excluded_keyword} jobs (keyword mismatch)")
+        logger.info(f"   Excluded {excluded_experience} jobs (not entry-level)")
+        logger.info(f"   Excluded {excluded_phd} jobs (PhD required)")
+        logger.info(f"   Excluded {excluded_internship} jobs (internship)")
+        logger.info(f"   Tracked {no_visa_count} jobs without visa sponsorship (not filtered)")
+        logger.info(f"   ✅ {len(filtered)} jobs passed LLM filter (async)")
 
         return filtered
 
@@ -440,7 +468,7 @@ class OpenRouterLLMFilter:
         Note: num_workers is ignored, concurrency is controlled by self.concurrency
         """
         if num_workers > 0:
-            print(f"   ⚠️ num_workers={num_workers} ignored, using async concurrency={self.concurrency}")
+            logger.warning(f"   ⚠️ num_workers={num_workers} ignored, using async concurrency={self.concurrency}")
         return self.filter_jobs(jobs_list, search_terms, verbose)
 
 
