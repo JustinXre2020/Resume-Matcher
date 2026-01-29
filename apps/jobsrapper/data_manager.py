@@ -134,58 +134,72 @@ class DataManager:
         print(f"📂 Loaded {data.get('count', 0)} jobs from {filepath}")
         return data
     
-    def list_data_files(self, extension: str = "json") -> List[Path]:
+    def list_data_files(self, extension: str = "json", prefix: Optional[str] = None) -> List[Path]:
         """
         List all data files in the data directory
-        
+
         Args:
             extension: File extension to filter (json or csv)
-            
+            prefix: Optional prefix filter (e.g., 'filtered_jobs', 'all_jobs')
+                    If None, matches all files with the extension
+
         Returns:
             List of Path objects
         """
-        pattern = f"jobs_*.{extension}"
+        if prefix:
+            pattern = f"{prefix}_*.{extension}"
+        else:
+            # Match all job files: jobs_*, all_jobs_*, filtered_jobs_*, etc.
+            pattern = f"*.{extension}"
         files = list(self.data_dir.glob(pattern))
         files.sort()  # Sort by filename (chronologically)
         return files
-    
+
     def cleanup_old_files(self, days: int = 7) -> int:
         """
         Remove data files older than specified days
-        
+
         Args:
             days: Keep files newer than this many days
-            
+
         Returns:
             Number of files deleted
         """
+        import re
         cutoff_date = datetime.now() - timedelta(days=days)
         deleted_count = 0
-        
+        # Pattern to extract date from filenames like:
+        # jobs_2026-01-18_08-00.json
+        # filtered_jobs_Software_Engineer_2026-01-18_08-00.json
+        date_pattern = re.compile(r'(\d{4}-\d{2}-\d{2})_\d{2}-\d{2}\.')
+
         for extension in ['json', 'csv']:
             files = self.list_data_files(extension)
-            
+
             for filepath in files:
                 try:
-                    # Extract date from filename: jobs_2026-01-18_08-00.json
                     filename = filepath.name
-                    date_str = filename.split('_')[1]  # Get '2026-01-18'
+                    match = date_pattern.search(filename)
+                    if not match:
+                        continue  # Skip files without date pattern
+
+                    date_str = match.group(1)  # Get '2026-01-18'
                     file_date = datetime.strptime(date_str, '%Y-%m-%d')
-                    
+
                     if file_date < cutoff_date:
                         filepath.unlink()
                         print(f"🗑️  Deleted old file: {filepath.name}")
                         deleted_count += 1
-                        
-                except (ValueError, IndexError) as e:
+
+                except (ValueError, IndexError):
                     print(f"⚠️  Skipping file with invalid name: {filepath.name}")
                     continue
-        
+
         if deleted_count > 0:
             print(f"✅ Cleaned up {deleted_count} old files (older than {days} days)")
         else:
             print(f"✅ No old files to clean up")
-        
+
         return deleted_count
     
     def get_statistics(self) -> Dict:
