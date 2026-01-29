@@ -61,6 +61,11 @@ def parse_recipients() -> List[Recipient]:
                     search_terms=search_terms
                 ))
 
+            # Debug: print recipients list
+            print(f"   DEBUG: recipients list = {recipients}")
+            for i, r in enumerate(recipients):
+                print(f"   DEBUG: recipient[{i}] = email={r.email}, needs_sponsorship={r.needs_sponsorship}, search_terms={r.search_terms}")
+
             if recipients:
                 print(f"   Loaded {len(recipients)} recipient(s) from RECIPIENTS config")
                 return recipients
