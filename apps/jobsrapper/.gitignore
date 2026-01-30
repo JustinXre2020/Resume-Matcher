@@ -34,8 +34,9 @@ data/*.json
 data/*.csv
 data/all_jobs*.csv
 
-# Logs
-logs/
+# Logs (keep folder, ignore log files)
+logs/*.log
+!logs/.gitkeep
 
 # Virtual Environment
 venv/
@@ -53,10 +54,6 @@ uv.lock
 *.swp
 *.swo
 *~
-
-# Logs
-*.log
-logs/
 
 # OS
 .DS_Store
