@@ -1,12 +1,14 @@
 """
-Email sender using Resend API
+Email sender using Gmail SMTP
 Sends daily job digest with HTML formatting
 Supports multiple recipients with per-recipient job filtering
 """
 import os
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from typing import List, Dict, Optional, Union
 from datetime import datetime
-import resend
 from dotenv import load_dotenv
 
 from config import Recipient, parse_recipients
@@ -15,26 +17,63 @@ load_dotenv()
 
 
 class EmailSender:
-    """Email dispatcher using Resend service with multi-recipient support"""
+    """Email dispatcher using Gmail SMTP with multi-recipient support"""
 
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self):
         """
-        Initialize Resend client with multi-recipient configuration
-
-        Args:
-            api_key: Resend API key (defaults to env var)
+        Initialize Gmail SMTP client with multi-recipient configuration
         """
-        self.api_key = api_key or os.getenv("RESEND_API_KEY")
+        self.gmail_email = os.getenv("GMAIL_EMAIL")
+        self.gmail_app_password = os.getenv("GMAIL_APP_PASSWORD")
 
-        if not self.api_key:
-            raise ValueError("RESEND_API_KEY not found in environment")
+        if not self.gmail_email or not self.gmail_app_password:
+            raise ValueError(
+                "GMAIL_EMAIL and GMAIL_APP_PASSWORD must be set in environment. "
+                "Get an App Password from: https://myaccount.google.com/apppasswords"
+            )
 
-        resend.api_key = self.api_key
-        self.from_email = "Job Hunter <onboarding@resend.dev>"  # Resend test domain
+        self.smtp_server = "smtp.gmail.com"
+        self.smtp_port = 587
+        self.from_email = self.gmail_email
 
         # Load recipients from config
         self.recipients = parse_recipients()
         print(f"   📧 Loaded {len(self.recipients)} recipient(s)")
+
+    def _send_email(self, to_email: str, subject: str, html_body: str) -> bool:
+        """
+        Send an email via Gmail SMTP.
+
+        Args:
+            to_email: Recipient email address
+            subject: Email subject
+            html_body: HTML content of the email
+
+        Returns:
+            True if sent successfully, False otherwise
+        """
+        try:
+            # Create message
+            msg = MIMEMultipart("alternative")
+            msg["Subject"] = subject
+            msg["From"] = f"Job Hunter Sentinel <{self.from_email}>"
+            msg["To"] = to_email
+
+            # Attach HTML content
+            html_part = MIMEText(html_body, "html", "utf-8")
+            msg.attach(html_part)
+
+            # Connect and send
+            with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
+                server.starttls()
+                server.login(self.gmail_email, self.gmail_app_password)
+                server.sendmail(self.from_email, to_email, msg.as_string())
+
+            return True
+
+        except Exception as e:
+            print(f"   ❌ SMTP error: {e}")
+            return False
 
     def filter_jobs_for_recipient(
         self,
@@ -226,7 +265,7 @@ class EmailSender:
                         由 Job Hunter Sentinel 自动生成
                     </p>
                     <p style="margin: 0; color: #94a3b8; font-size: 12px;">
-                        使用 Python JobSpy + Gemini AI + Resend 构建
+                        使用 Python JobSpy + LLM AI + Gmail SMTP 构建
                     </p>
                 </div>
 
@@ -284,20 +323,16 @@ class EmailSender:
                 # Subject with recipient-specific job count
                 subject = custom_subject or f"🎯 Job Hunter Daily Digest - {len(filtered_jobs)} 个职位推荐 ({today})"
 
-                # Send via Resend
+                # Send via Gmail SMTP
                 print(f"   📧 Sending {len(filtered_jobs)} jobs to {recipient.email}...")
 
-                params = {
-                    "from": self.from_email,
-                    "to": [recipient.email],
-                    "subject": subject,
-                    "html": html_body
-                }
+                success = self._send_email(recipient.email, subject, html_body)
 
-                response = resend.Emails.send(params)
-
-                print(f"   ✅ Email sent to {recipient.email}! ID: {response.get('id', 'N/A')}")
-                results[recipient.email] = True
+                if success:
+                    print(f"   ✅ Email sent to {recipient.email}!")
+                    results[recipient.email] = True
+                else:
+                    results[recipient.email] = False
 
             except Exception as e:
                 print(f"   ❌ Email to {recipient.email} failed: {e}")
@@ -338,18 +373,17 @@ class EmailSender:
         </html>
         """
 
+        subject = f"📭 Job Hunter - 今日无新职位 ({today})"
+
         for recipient in self.recipients:
             try:
-                params = {
-                    "from": self.from_email,
-                    "to": [recipient.email],
-                    "subject": f"📭 Job Hunter - 今日无新职位 ({today})",
-                    "html": html_body
-                }
+                success = self._send_email(recipient.email, subject, html_body)
 
-                response = resend.Emails.send(params)
-                print(f"   📭 Empty notification sent to {recipient.email}. ID: {response.get('id', 'N/A')}")
-                results[recipient.email] = True
+                if success:
+                    print(f"   📭 Empty notification sent to {recipient.email}.")
+                    results[recipient.email] = True
+                else:
+                    results[recipient.email] = False
 
             except Exception as e:
                 print(f"   ❌ Failed to send empty notification to {recipient.email}: {e}")
