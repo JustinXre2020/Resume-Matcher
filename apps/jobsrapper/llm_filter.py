@@ -45,25 +45,59 @@ def _create_prompt(job: Dict, search_terms: List[str]) -> str:
     description = _safe_str(job.get('description'), '')
     search_terms_str = ", ".join(search_terms)
 
-    prompt = f"""Analyze this job posting and answer with JSON only.
+    prompt = f"""
+        ### ROLE
+        You are an expert Recruitment Consultant and Talent Acquisition Specialist across all industries. You specialize in mapping job titles to standardized job families, understanding that different companies use different nomenclature for the same professional role.
 
-Job Title: {title}
-Company: {company}
-Location: {location}
-Description: {description}
+        ### DATA
+        Job Title: {title}
+        Company: {company}
+        Location: {location}
+        Description: {description}
 
-Target Roles: {search_terms_str}
+        Target Roles: {search_terms_str}
 
-Evaluate:
-1. keyword_match: Does the job title/description match any target roles? That is, does one of the target roles, which are separated by a comma, exist in the job title/description? (true/false)
-2. visa_sponsorship: Does it mention H1B, visa sponsorship, or NOT explicitly reject sponsorship? (true/false)
-3. entry_level: Is this entry-level (0-3 years experience required)? keywords including "entry", "junior", "associate", "new grad", or "0-3 years of experience" should be true. keywords like
-    senior, mid-level, Sr., staff, principal should be considered false. (true/false)
-4. requires_phd: Does it require a PhD or doctorate? (true/false)
-5. is_internship: Is this an internship position? Look for keywords like "intern", "internship", "co-op", or "summer program". (true/false)
+        ### INSTRUCTIONS
+        Analyze the job posting above and extract the following data points into JSON format.
 
-Respond ONLY with valid JSON:
-{{"keyword_match": true/false, "visa_sponsorship": true/false, "entry_level": true/false, "requires_phd": true/false, "is_internship": true/false, "reason": "brief explanation"}}"""
+        1. keyword_match: (true/false)
+        - Perform a semantic match between the "Job Title" and the "Target Roles" list.
+        - Return TRUE if the Job Title represents the same professional function as any Target Role, even if the wording differs. 
+        - Examples of matches:
+            - "Software Developer" matches "Software Engineer"
+            - "Account Executive" matches "Sales Representative"
+            - "Administrative Assistant" matches "Office Coordinator"
+            - "Data Scientist" matches "Machine Learning Engineer"
+        - Ignore seniority levels (e.g., "II", "Senior", "Lead") unless the Target Role list specifically filters for them.
+
+        2. visa_sponsorship: (true/false)
+        - Does the description explicitly state they will NOT provide sponsorship?
+        - Return FALSE if you see phrases like "Must be a US Citizen," "No sponsorship available," or "Work authorization required without sponsorship."
+        - Return TRUE if sponsorship is mentioned as available, OR if there is no mention of work authorization requirements (assume a neutral/positive stance).
+
+        3. is_internship: (true/false)
+        - Return TRUE if the job is labeled as an "Intern," "Co-op," "Fellowship," or "Apprenticeship."
+
+        4. entry_level: (true/false)
+        - Determine if this is a "starting" role (0-3 years of experience).
+        - Return FALSE if: The title includes "Senior," "Lead," "Principal," "Director," or if the text requires 4+ years of experience.
+        - Return TRUE if: The title includes "Junior," "Associate," "Entry-level," "Trainee," "Intern," "Internship", or if the experience requirement is 0-3 years (or not mentioned).
+
+        5. requires_phd: (true/false)
+        - Return TRUE only if a PhD or Doctorate is explicitly listed as a MANDATORY requirement. (If it is "preferred," return false).
+
+
+        ### OUTPUT FORMAT
+        Respond ONLY with valid JSON.
+        {{
+            "keyword_match": boolean,
+            "visa_sponsorship": boolean,
+            "entry_level": boolean,
+            "requires_phd": boolean,
+            "is_internship": boolean,
+            "reason": "Identify the specific Target Role that matched and the years of experience found."
+        }}
+        """
 
     return prompt
 
@@ -624,7 +658,7 @@ Target Roles: {search_terms_str}
 Evaluate:
 1. keyword_match: Does the job title/description match any target roles? (true/false)
 2. visa_sponsorship: Does it mention H1B, visa sponsorship, or NOT explicitly reject sponsorship? (true/false)
-3. entry_level: Is this entry-level (0-1 years experience required or doesn't mention experience at all)? Check for "entry", "junior", "associate", "new grad", or the requireed years of experience is less than/equal to 1.(true/false)
+3. entry_level: Is this entry-level (0-1 years experience required or doesn't mention experience at all)? Check for "entry", "junior", "associate", "new grad", or the required years of experience is less than/equal to 1.(true/false)
 4. requires_phd: Does it require a PhD or doctorate? (true/false)
 5. is_internship: Is this an internship position? Look for keywords like "intern", "internship", "co-op", or "summer program". (true/false)
 

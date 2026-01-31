@@ -4,6 +4,7 @@ Supports both SQLite and text file storage
 """
 import os
 import json
+from pathlib import Path
 from typing import Set, Optional, Dict, List
 from datetime import datetime
 from sqlalchemy import create_engine, Column, String, Integer, DateTime, Text
@@ -12,6 +13,10 @@ from sqlalchemy.orm import sessionmaker, Session
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# Ensure data directory exists
+DATA_DIR = Path(__file__).parent / "data"
+DATA_DIR.mkdir(exist_ok=True)
 
 Base = declarative_base()
 
@@ -39,13 +44,15 @@ class JobDatabase:
     def __init__(self, database_url: Optional[str] = None):
         """
         Initialize database connection
-        
+
         Args:
             database_url: SQLAlchemy connection string or path
         """
-        self.database_url = database_url or os.getenv("DATABASE_URL", "sqlite:///./jobs.db")
+        # Default to data/ directory for SQLite
+        default_db = f"sqlite:///{DATA_DIR / 'jobs.db'}"
+        self.database_url = database_url or os.getenv("DATABASE_URL", default_db)
         self.use_sqlite = self.database_url.startswith("sqlite")
-        self.fallback_file = "sent_jobs.txt"
+        self.fallback_file = str(DATA_DIR / "sent_jobs.txt")
         
         try:
             # Try to initialize SQLAlchemy

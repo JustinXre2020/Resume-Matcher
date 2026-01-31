@@ -37,12 +37,17 @@ jobs:
       - name: Run Job Hunter Sentinel
         working-directory: apps/jobsrapper
         env:
-          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          # Gmail SMTP Configuration
+          GMAIL_EMAIL: ${{ secrets.GMAIL_EMAIL }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          # Recipient Configuration
           RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}  # Legacy fallback
           RECIPIENTS: ${{ secrets.RECIPIENTS }}  # Multi-recipient JSON config
+          # Database & API
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           OPENROUTER_MODEL: ${{ secrets.OPENROUTER_MODEL }}
+          # Job Search Configuration
           SEARCH_TERMS: ${{ vars.SEARCH_TERMS }}  # Legacy fallback for single recipient
           LOCATIONS: ${{ vars.LOCATIONS }}
           RESULTS_WANTED: ${{ vars.RESULTS_WANTED }}
