@@ -4,11 +4,26 @@ Supports multi-recipient with per-recipient search terms and sponsorship needs
 """
 import os
 import json
+import logging
 from dataclasses import dataclass
 from typing import List, Optional
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
+
+
+def mask_email(email: str) -> str:
+    """Mask email address for privacy in logs (e.g., j***n@gmail.com)"""
+    if not email or '@' not in email:
+        return '***'
+    local, domain = email.split('@', 1)
+    if len(local) <= 2:
+        masked_local = local[0] + '***'
+    else:
+        masked_local = local[0] + '***' + local[-1]
+    return f"{masked_local}@{domain}"
 
 
 @dataclass
@@ -61,17 +76,17 @@ def parse_recipients() -> List[Recipient]:
                     search_terms=search_terms
                 ))
 
-            # Debug: print recipients list
-            print(f"   DEBUG: recipients list = {recipients}")
+            # Debug: log recipients list (with masked emails)
+            logger.debug(f"{len(recipients)} recipient(s) loaded")
             for i, r in enumerate(recipients):
-                print(f"   DEBUG: recipient[{i}] = email={r.email}, needs_sponsorship={r.needs_sponsorship}, search_terms={r.search_terms}")
+                logger.debug(f"recipient[{i}] = email={mask_email(r.email)}, needs_sponsorship={r.needs_sponsorship}, search_terms={r.search_terms}")
 
             if recipients:
-                print(f"   Loaded {len(recipients)} recipient(s) from RECIPIENTS config")
+                logger.info(f"Loaded {len(recipients)} recipient(s) from RECIPIENTS config")
                 return recipients
 
         except json.JSONDecodeError as e:
-            print(f"   Warning: Invalid RECIPIENTS JSON: {e}")
+            logger.warning(f"Invalid RECIPIENTS JSON: {e}")
             # Fall through to legacy format
 
     # Legacy fallback: single recipient with global search terms
@@ -87,7 +102,7 @@ def parse_recipients() -> List[Recipient]:
     search_terms_str = os.getenv("SEARCH_TERMS", "entry level software engineer")
     search_terms = [term.strip() for term in search_terms_str.split(",") if term.strip()]
 
-    print(f"   Using legacy config: {recipient_email} (needs_sponsorship=True)")
+    logger.info(f"Using legacy config: {mask_email(recipient_email)} (needs_sponsorship=True)")
 
     return [Recipient(
         email=recipient_email,
@@ -121,22 +136,23 @@ def get_all_search_terms(recipients: List[Recipient]) -> List[str]:
 
 def main():
     """Test configuration parsing"""
-    print("Testing configuration parsing...\n")
+    logging.basicConfig(level=logging.DEBUG)
+    logger.info("Testing configuration parsing...")
 
     # Test with current env
     try:
         recipients = parse_recipients()
-        print(f"\nParsed {len(recipients)} recipient(s):")
+        logger.info(f"Parsed {len(recipients)} recipient(s):")
         for r in recipients:
-            print(f"  - {r.email}")
-            print(f"    needs_sponsorship: {r.needs_sponsorship}")
-            print(f"    search_terms: {r.search_terms}")
+            logger.info(f"  - {mask_email(r.email)}")
+            logger.info(f"    needs_sponsorship: {r.needs_sponsorship}")
+            logger.info(f"    search_terms: {r.search_terms}")
 
         all_terms = get_all_search_terms(recipients)
-        print(f"\nAll unique search terms: {all_terms}")
+        logger.info(f"All unique search terms: {all_terms}")
 
     except ValueError as e:
-        print(f"Error: {e}")
+        logger.error(f"Error: {e}")
 
 
 if __name__ == "__main__":

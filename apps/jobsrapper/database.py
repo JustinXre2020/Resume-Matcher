@@ -4,6 +4,7 @@ Supports both SQLite and text file storage
 """
 import os
 import json
+import logging
 from pathlib import Path
 from typing import Set, Optional, Dict, List
 from datetime import datetime
@@ -13,6 +14,8 @@ from sqlalchemy.orm import sessionmaker, Session
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 # Ensure data directory exists
 DATA_DIR = Path(__file__).parent / "data"
@@ -60,11 +63,11 @@ class JobDatabase:
             Base.metadata.create_all(self.engine)
             self.SessionLocal = sessionmaker(bind=self.engine)
             self.db_available = True
-            print(f"✅ Database initialized: {self.database_url}")
-            
+            logger.info(f"✅ Database initialized: {self.database_url}")
+
         except Exception as e:
-            print(f"⚠️ Database initialization failed: {e}")
-            print(f"📝 Falling back to text file: {self.fallback_file}")
+            logger.warning(f"⚠️ Database initialization failed: {e}")
+            logger.info(f"📝 Falling back to text file: {self.fallback_file}")
             self.db_available = False
             
             # Ensure fallback file exists
@@ -94,7 +97,7 @@ class JobDatabase:
                 exists = session.query(SentJob).filter_by(job_url=job_url).first() is not None
                 return exists
             except Exception as e:
-                print(f"❌ Database query error: {e}")
+                logger.error(f"❌ Database query error: {e}")
                 return self._is_job_sent_fallback(job_url)
             finally:
                 session.close()
@@ -108,7 +111,7 @@ class JobDatabase:
                 sent_urls = set(line.strip() for line in f if line.strip())
                 return job_url in sent_urls
         except Exception as e:
-            print(f"❌ Fallback file read error: {e}")
+            logger.error(f"❌ Fallback file read error: {e}")
             return False
     
     def mark_as_sent(
@@ -140,7 +143,7 @@ class JobDatabase:
                 # Check if already exists
                 existing = session.query(SentJob).filter_by(job_url=job_url).first()
                 if existing:
-                    print(f"⚠️ Job already marked as sent: {job_url}")
+                    logger.debug(f"⚠️ Job already marked as sent: {job_url}")
                     return True
                 
                 # Create new record
@@ -158,7 +161,7 @@ class JobDatabase:
                 return True
                 
             except Exception as e:
-                print(f"❌ Database insert error: {e}")
+                logger.error(f"❌ Database insert error: {e}")
                 session.rollback()
                 return self._mark_as_sent_fallback(job_url)
             finally:
@@ -173,7 +176,7 @@ class JobDatabase:
                 f.write(f"{job_url}\n")
             return True
         except Exception as e:
-            print(f"❌ Fallback file write error: {e}")
+            logger.error(f"❌ Fallback file write error: {e}")
             return False
     
     def get_sent_jobs(self, limit: int = 100) -> List[Dict]:
@@ -207,13 +210,13 @@ class JobDatabase:
                     for job in jobs
                 ]
             except Exception as e:
-                print(f"❌ Database query error: {e}")
+                logger.error(f"❌ Database query error: {e}")
                 return []
             finally:
                 session.close()
         else:
             return self._get_sent_jobs_fallback(limit)
-    
+
     def _get_sent_jobs_fallback(self, limit: int) -> List[Dict]:
         """Get sent jobs from text file"""
         try:
@@ -221,7 +224,7 @@ class JobDatabase:
                 urls = [line.strip() for line in f if line.strip()]
                 return [{"job_url": url} for url in urls[-limit:]]
         except Exception as e:
-            print(f"❌ Fallback file read error: {e}")
+            logger.error(f"❌ Fallback file read error: {e}")
             return []
     
     def filter_new_jobs(self, jobs: List[Dict]) -> List[Dict]:
@@ -240,15 +243,15 @@ class JobDatabase:
             job_url = job.get('job_url') or job.get('job_data', {}).get('job_url')
             
             if not job_url:
-                print("⚠️ Job missing job_url, skipping")
+                logger.warning("⚠️ Job missing job_url, skipping")
                 continue
-            
+
             if not self.is_job_sent(job_url):
                 new_jobs.append(job)
             else:
-                print(f"⏭️ Skipping duplicate: {job.get('title', 'Unknown')} at {job.get('company', 'Unknown')}")
-        
-        print(f"🆕 {len(new_jobs)}/{len(jobs)} new jobs to send")
+                logger.debug(f"⏭️ Skipping duplicate: {job.get('title', 'Unknown')} at {job.get('company', 'Unknown')}")
+
+        logger.info(f"🆕 {len(new_jobs)}/{len(jobs)} new jobs to send")
         return new_jobs
     
     def cleanup_old_records(self, days: int = 90):
@@ -259,23 +262,23 @@ class JobDatabase:
             days: Keep records newer than this many days
         """
         if not self.db_available:
-            print("⚠️ Cleanup only available for database mode")
+            logger.warning("⚠️ Cleanup only available for database mode")
             return
-        
+
         session = self._get_session()
         try:
             from datetime import timedelta
             cutoff_date = datetime.utcnow() - timedelta(days=days)
-            
+
             deleted = session.query(SentJob)\
                 .filter(SentJob.sent_at < cutoff_date)\
                 .delete()
-            
+
             session.commit()
-            print(f"🗑️ Cleaned up {deleted} old records (older than {days} days)")
-            
+            logger.info(f"🗑️ Cleaned up {deleted} old records (older than {days} days)")
+
         except Exception as e:
-            print(f"❌ Cleanup error: {e}")
+            logger.error(f"❌ Cleanup error: {e}")
             session.rollback()
         finally:
             session.close()

@@ -4,11 +4,14 @@ Evaluates job postings for H-1B visa applicant friendliness
 """
 import os
 import time
+import logging
 from typing import Dict, Optional, List
 import google.generativeai as genai
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 
 class AIAnalyzer:
@@ -106,7 +109,7 @@ class AIAnalyzer:
             return result
             
         except Exception as e:
-            print(f"❌ Analysis error for {title} at {company}: {e}")
+            logger.error(f"❌ Analysis error for {title} at {company}: {e}")
             return {
                 "score": 0,
                 "summary": f"分析出错：{str(e)[:100]}",
@@ -168,7 +171,7 @@ class AIAnalyzer:
             }
             
         except Exception as e:
-            print(f"⚠️ Response parsing error: {e}")
+            logger.warning(f"⚠️ Response parsing error: {e}")
             return {
                 "score": 5,
                 "summary": response_text[:200]  # Return first 200 chars as fallback
@@ -192,7 +195,7 @@ class AIAnalyzer:
         results = []
         
         for i, job in enumerate(jobs, 1):
-            print(f"🤖 Analyzing {i}/{len(jobs)}: {job.get('title', 'Unknown')} at {job.get('company', 'Unknown')}")
+            logger.info(f"🤖 Analyzing {i}/{len(jobs)}: {job.get('title', 'Unknown')} at {job.get('company', 'Unknown')}")
             
             result = self.analyze_job(
                 title=job.get('title', 'Unknown'),
@@ -233,7 +236,7 @@ class AIAnalyzer:
         # Sort by score descending
         filtered.sort(key=lambda x: x.get('score', 0), reverse=True)
         
-        print(f"✅ {len(filtered)}/{len(analyzed_jobs)} jobs passed threshold (score >= {min_score})")
+        logger.info(f"✅ {len(filtered)}/{len(analyzed_jobs)} jobs passed threshold (score >= {min_score})")
         
         return filtered
 
@@ -271,10 +274,10 @@ def main():
         description=test_job["description"]
     )
     
-    print("\n📊 Analysis Result:")
-    print(f"Score: {result['score']}/10")
-    print(f"Summary: {result['summary']}")
-    print(f"\nRaw Response:\n{result['raw_response']}")
+    logger.info("📊 Analysis Result:")
+    logger.info(f"Score: {result['score']}/10")
+    logger.info(f"Summary: {result['summary']}")
+    logger.info(f"Raw Response: {result['raw_response']}")
 
 
 if __name__ == "__main__":
