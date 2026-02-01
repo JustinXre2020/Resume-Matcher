@@ -46,9 +46,6 @@ def _create_prompt(job: Dict, search_terms: List[str]) -> str:
     search_terms_str = ", ".join(search_terms)
 
     prompt = f"""
-        ### ROLE
-        You are an expert Recruitment Consultant and Talent Acquisition Specialist across all industries. You specialize in mapping job titles to standardized job families, understanding that different companies use different nomenclature for the same professional role.
-
         ### DATA
         Job Title: {title}
         Company: {company}
@@ -272,7 +269,7 @@ async def evaluate_job_async(
         prompt = _create_prompt(job, search_terms)
 
         messages = [
-            {"role": "system", "content": "You are a job posting analyzer. Respond only with valid JSON."},
+            {"role": "system", "content": "You are an expert Recruitment Consultant and Talent Acquisition Specialist across all industries. You specialize in mapping job titles to standardized job families, understanding that different companies use different nomenclature for the same professional role."},
             {"role": "user", "content": prompt}
         ]
 

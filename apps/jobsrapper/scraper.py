@@ -20,7 +20,7 @@ class JobScraper:
     """Job scraper with retry logic and error handling"""
     
     def __init__(self):
-        self.sites = [item.strip() for item in os.getenv("SITES").split(",") if item.strip()]
+        self.sites = [item.strip() for item in os.getenv("SITES", "indeed").split(",") if item.strip()]
         self.max_retries = 3
         self.base_delay = 2  # seconds
         
