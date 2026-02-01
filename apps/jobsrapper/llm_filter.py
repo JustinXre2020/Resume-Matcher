@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 # OpenRouter API Configuration
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
-OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "liquid/lfm-2.5-1.2b-instruct")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "liquid/lfm-2.5-1.2b-instruct:free")
 
 
 class OpenRouterError(Exception):
@@ -445,9 +445,14 @@ class OpenRouterLLMFilter:
         excluded_phd = 0
         excluded_internship = 0
         skipped = 0
+        error = 0
         no_visa_count = 0  # Track for stats, but don't filter
 
         for job, evaluation in results:
+            if evaluation.get("error", False):
+                error += 1
+                continue
+
             if evaluation.get("skipped", False):
                 skipped += 1
                 continue
@@ -477,6 +482,7 @@ class OpenRouterLLMFilter:
             job['llm_evaluation'] = evaluation
             filtered.append(job)
 
+        logger.info(f"   Skipped {error} errored jobs (error calling OpenRouter)")
         logger.info(f"   Skipped {skipped} jobs (no description)")
         logger.info(f"   Excluded {excluded_keyword} jobs (keyword mismatch)")
         logger.info(f"   Excluded {excluded_experience} jobs (not entry-level)")
