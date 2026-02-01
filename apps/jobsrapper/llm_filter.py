@@ -11,7 +11,7 @@ import asyncio
 import logging
 from typing import Dict, List, Optional, Any
 from dotenv import load_dotenv
-import aiohttp
+from openai import AsyncOpenAI
 import pandas as pd
 
 # Load environment variables
@@ -20,9 +20,28 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 # OpenRouter API Configuration
-OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
+OPENROUTER_API_URL = "https://openrouter.ai/api/v1"
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "liquid/lfm-2.5-1.2b-instruct:free")
+_openrouter_client: Optional[AsyncOpenAI] = None
+
+
+def _get_openrouter_client() -> AsyncOpenAI:
+    """Get or create the shared AsyncOpenAI client for OpenRouter."""
+    global _openrouter_client
+    if _openrouter_client is None:
+        if not OPENROUTER_API_KEY:
+            raise OpenRouterError("OPENROUTER_API_KEY environment variable not set")
+        _openrouter_client = AsyncOpenAI(
+            base_url=OPENROUTER_API_URL,
+            api_key=OPENROUTER_API_KEY,
+            default_headers={
+                "HTTP-Referer": "https://resume-matcher.app",
+                "X-Title": "JobsWrapper-Filter",
+            },
+            timeout=60.0,
+        )
+    return _openrouter_client
 
 
 class OpenRouterError(Exception):
@@ -46,28 +65,20 @@ def _create_prompt(job: Dict, search_terms: List[str]) -> str:
     search_terms_str = ", ".join(search_terms)
 
     prompt = f"""
-        ### ROLE
-        You are an expert Recruitment Consultant and Talent Acquisition Specialist across all industries. You specialize in mapping job titles to standardized job families, understanding that different companies use different nomenclature for the same professional role.
-
         ### DATA
         Job Title: {title}
         Company: {company}
         Location: {location}
-        Description: {description}
+        Target Roles: [{search_terms_str}]
 
-        Target Roles: {search_terms_str}
+        Description: {description}
 
         ### INSTRUCTIONS
         Analyze the job posting above and extract the following data points into JSON format.
 
         1. keyword_match: (true/false)
         - Perform a semantic match between the "Job Title" and the "Target Roles" list.
-        - Return TRUE if the Job Title represents the same professional function as any Target Role, even if the wording differs. 
-        - Examples of matches:
-            - "Software Developer" matches "Software Engineer"
-            - "Account Executive" matches "Sales Representative"
-            - "Administrative Assistant" matches "Office Coordinator"
-            - "Data Scientist" matches "Machine Learning Engineer"
+        - Return TRUE if the job represents the same professional function as any Target Role, even if the wording differs. 
         - Ignore seniority levels (e.g., "II", "Senior", "Lead") unless the Target Role list specifically filters for them.
 
         2. visa_sponsorship: (true/false)
@@ -150,19 +161,19 @@ async def _call_openrouter(
     messages: List[Dict[str, str]],
     model: str = OPENROUTER_MODEL,
     temperature: float = 0.1,
-    max_tokens: int = 256,
-    session: Optional[aiohttp.ClientSession] = None,
+    max_tokens: int = 8192,
+    client: Optional[AsyncOpenAI] = None,
     job_context: Optional[str] = None,
 ) -> str:
     """
-    Make an async call to OpenRouter API.
+    Make an async call to OpenRouter API using AsyncOpenAI client.
 
     Args:
         messages: List of message dicts with 'role' and 'content' keys.
         model: OpenRouter model identifier.
         temperature: Sampling temperature (0-1).
         max_tokens: Maximum tokens in response.
-        session: Optional aiohttp session for connection reuse.
+        client: Optional AsyncOpenAI client for connection reuse.
         job_context: Optional job identifier for logging (e.g., "Job Title @ Company").
 
     Returns:
@@ -171,71 +182,42 @@ async def _call_openrouter(
     Raises:
         OpenRouterError: If the API call fails.
     """
-    if not OPENROUTER_API_KEY:
-        raise OpenRouterError("OPENROUTER_API_KEY environment variable not set")
-
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://resume-matcher.app",
-        "X-Title": "JobsWrapper-Filter",
-    }
-
-    payload = {
-        "model": model,
-        "messages": messages,
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-    }
+    if client is None:
+        client = _get_openrouter_client()
 
     # Log the prompt being sent
     context_str = f" [{job_context}]" if job_context else ""
     user_prompt = next((m['content'] for m in messages if m['role'] == 'user'), '')
     logger.debug(f"LLM_PROMPT{context_str}:\n{'-'*60}\n{user_prompt}\n{'-'*60}")
 
-    should_close = False
-    if session is None:
-        session = aiohttp.ClientSession()
-        should_close = True
-
     try:
-        async with session.post(
-            OPENROUTER_API_URL,
-            headers=headers,
-            json=payload,
-            timeout=aiohttp.ClientTimeout(total=60),
-        ) as response:
-            if response.status != 200:
-                error_text = await response.text()
-                logger.error(f"OpenRouter API error{context_str}: {response.status} - {error_text}")
-                # Raise specific error for rate limiting (429)
-                if response.status == 429:
-                    raise OpenRouterError(f"Rate limited (429)")
-                raise OpenRouterError(f"API request failed with status {response.status}")
+        response = await client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
 
-            data = await response.json()
-            response_content = data["choices"][0]["message"]["content"]
+        response_content = response.choices[0].message.content
 
-            # Log the response received
-            logger.debug(f"LLM_RESPONSE{context_str}:\n{'-'*60}\n{response_content}\n{'-'*60}")
+        # Log the response received
+        logger.debug(f"LLM_RESPONSE{context_str}:\n{'-'*60}\n{response_content}\n{'-'*60}")
 
-            return response_content
+        return response_content
 
-    except aiohttp.ClientError as e:
-        logger.error(f"OpenRouter connection error{context_str}: {e}")
-        raise OpenRouterError(f"Connection error: {e}") from e
-    except (KeyError, IndexError) as e:
-        logger.error(f"OpenRouter response parsing error{context_str}: {e}")
-        raise OpenRouterError(f"Invalid response format: {e}") from e
-    finally:
-        if should_close:
-            await session.close()
+    except Exception as e:
+        error_str = str(e)
+        logger.error(f"OpenRouter API error{context_str}: {error_str}")
+        # Check for rate limiting (429)
+        if "429" in error_str or "rate" in error_str.lower():
+            raise OpenRouterError("Rate limited (429)") from e
+        raise OpenRouterError(f"API request failed: {error_str}") from e
 
 
 async def evaluate_job_async(
     job: Dict,
     search_terms: List[str],
-    session: Optional[aiohttp.ClientSession] = None,
+    client: Optional[AsyncOpenAI] = None,
 ) -> Dict:
     """
     Evaluate a single job using OpenRouter API asynchronously.
@@ -243,7 +225,7 @@ async def evaluate_job_async(
     Args:
         job: Job dictionary with title, company, location, description
         search_terms: List of target job roles
-        session: Optional aiohttp session for connection reuse
+        client: Optional AsyncOpenAI client for connection reuse
 
     Returns:
         Evaluation result with pass/fail and reasons
@@ -272,11 +254,11 @@ async def evaluate_job_async(
         prompt = _create_prompt(job, search_terms)
 
         messages = [
-            {"role": "system", "content": "You are a job posting analyzer. Respond only with valid JSON."},
+            {"role": "system", "content": "You are an expert Recruitment Consultant and Talent Acquisition Specialist across all industries. You specialize in mapping job titles to standardized job families, understanding that different companies use different nomenclature for the same professional role."},
             {"role": "user", "content": prompt}
         ]
 
-        response_text = await _call_openrouter(messages, session=session, job_context=job_context)
+        response_text = await _call_openrouter(messages, client=client, job_context=job_context)
         result = _parse_response(response_text)
         result['job_title'] = job_title
         result['company'] = company
@@ -390,10 +372,10 @@ class OpenRouterLLMFilter:
         self,
         job: Dict,
         search_terms: List[str],
-        session: Optional[aiohttp.ClientSession] = None,
+        client: Optional[AsyncOpenAI] = None,
     ) -> Dict:
         """Evaluate a single job asynchronously."""
-        return await evaluate_job_async(job, search_terms, session)
+        return await evaluate_job_async(job, search_terms, client)
 
     async def filter_jobs_async(
         self,
@@ -421,21 +403,21 @@ class OpenRouterLLMFilter:
 
         results = []
         completed = 0
-        # Use a single session for all requests (connection pooling)
-        async with aiohttp.ClientSession() as session:
-            for batch_idx in range(0, total, self.concurrency):
-                jobs = jobs_list[batch_idx: batch_idx + self.concurrency]
+        # Use a single client for all requests (connection pooling)
+        client = _get_openrouter_client()
+        for batch_idx in range(0, total, self.concurrency):
+            jobs = jobs_list[batch_idx: batch_idx + self.concurrency]
 
-                async with asyncio.TaskGroup() as tg:
-                    tasks = [(job, tg.create_task(self.evaluate_job(job, search_terms, session))) for job in jobs]
-                # wait 60s for rate limiting and the futures finish
-                await asyncio.sleep(self.rate_limit_delay)
-                results += [(job, task_future.result()) for job, task_future in tasks]
-                completed += self.concurrency
+            async with asyncio.TaskGroup() as tg:
+                tasks = [(job, tg.create_task(self.evaluate_job(job, search_terms, client))) for job in jobs]
+            # wait for rate limiting
+            await asyncio.sleep(self.rate_limit_delay)
+            results += [(job, task_future.result()) for job, task_future in tasks]
+            completed += self.concurrency
 
-                if verbose:
-                    logger.info(f"   🤖 Evaluated {min(completed, total)}/{total}...")
-                batch_idx += self.concurrency
+            if verbose:
+                logger.info(f"   🤖 Evaluated {min(completed, total)}/{total}...")
+            batch_idx += self.concurrency
 
 
         # Process results
