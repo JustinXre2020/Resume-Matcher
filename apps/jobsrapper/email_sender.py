@@ -4,6 +4,7 @@ Sends daily job digest with HTML formatting
 Supports multiple recipients with per-recipient job filtering
 """
 import os
+import logging
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -14,6 +15,20 @@ from dotenv import load_dotenv
 from config import Recipient, parse_recipients
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
+
+
+def mask_email(email: str) -> str:
+    """Mask email address for privacy in logs (e.g., j***n@gmail.com)"""
+    if not email or '@' not in email:
+        return '***'
+    local, domain = email.split('@', 1)
+    if len(local) <= 2:
+        masked_local = local[0] + '***'
+    else:
+        masked_local = local[0] + '***' + local[-1]
+    return f"{masked_local}@{domain}"
 
 
 class EmailSender:
@@ -38,7 +53,7 @@ class EmailSender:
 
         # Load recipients from config
         self.recipients = parse_recipients()
-        print(f"   📧 Loaded {len(self.recipients)} recipient(s)")
+        logger.info(f"📧 Loaded {len(self.recipients)} recipient(s)")
 
     def _send_email(self, to_email: str, subject: str, html_body: str) -> bool:
         """
@@ -72,7 +87,7 @@ class EmailSender:
             return True
 
         except Exception as e:
-            print(f"   ❌ SMTP error: {e}")
+            logger.error(f"❌ SMTP error: {e}")
             return False
 
     def filter_jobs_for_recipient(
@@ -313,7 +328,7 @@ class EmailSender:
                 filtered_jobs = self.filter_jobs_for_recipient(jobs_by_term, recipient)
 
                 if not filtered_jobs:
-                    print(f"   ⚠️ No jobs for {recipient.email} (needs_sponsorship={recipient.needs_sponsorship})")
+                    logger.warning(f"⚠️ No jobs for {mask_email(recipient.email)} (needs_sponsorship={recipient.needs_sponsorship})")
                     results[recipient.email] = True  # Not a failure, just no matching jobs
                     continue
 
@@ -324,18 +339,18 @@ class EmailSender:
                 subject = custom_subject or f"🎯 Job Hunter Daily Digest - {len(filtered_jobs)} 个职位推荐 ({today})"
 
                 # Send via Gmail SMTP
-                print(f"   📧 Sending {len(filtered_jobs)} jobs to {recipient.email}...")
+                logger.info(f"📧 Sending {len(filtered_jobs)} jobs to {mask_email(recipient.email)}...")
 
                 success = self._send_email(recipient.email, subject, html_body)
 
                 if success:
-                    print(f"   ✅ Email sent to {recipient.email}!")
+                    logger.info(f"✅ Email sent to {mask_email(recipient.email)}!")
                     results[recipient.email] = True
                 else:
                     results[recipient.email] = False
 
             except Exception as e:
-                print(f"   ❌ Email to {recipient.email} failed: {e}")
+                logger.error(f"❌ Email to {mask_email(recipient.email)} failed: {e}")
                 results[recipient.email] = False
 
         return results
@@ -380,13 +395,13 @@ class EmailSender:
                 success = self._send_email(recipient.email, subject, html_body)
 
                 if success:
-                    print(f"   📭 Empty notification sent to {recipient.email}.")
+                    logger.info(f"📭 Empty notification sent to {mask_email(recipient.email)}.")
                     results[recipient.email] = True
                 else:
                     results[recipient.email] = False
 
             except Exception as e:
-                print(f"   ❌ Failed to send empty notification to {recipient.email}: {e}")
+                logger.error(f"❌ Failed to send empty notification to {mask_email(recipient.email)}: {e}")
                 results[recipient.email] = False
 
         return results
@@ -426,7 +441,7 @@ def main():
 
     # Send test email
     results = sender.send_daily_digest(jobs_by_term)
-    print(f"Results: {results}")
+    logger.info(f"Results: {results}")
 
 
 if __name__ == "__main__":

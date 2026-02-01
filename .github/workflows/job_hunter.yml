@@ -1,11 +1,12 @@
 name: Job Hunter Sentinel - Scheduled Runs
 
 on:
-  # Twice daily: 12 PM and 9 PM Eastern Standard Time (EST/UTC-5)
-  # Each run searches for jobs posted in the last 9 hours
+  # Twice daily: 6 AM and 1 PM Eastern Standard Time (EST/UTC-5)
+  # Each run searches for jobs posted in the last 24 hours
+  # Deduplication prevents sending the same job twice
   schedule:
-    - cron: '0 17 * * *'  # 12:00 PM EST (UTC 17:00)
-    - cron: '0 2 * * *'   # 9:00 PM EST (UTC 02:00 next day)
+    - cron: '0 11 * * *'  # 6:00 AM EST (UTC 11:00)
+    - cron: '0 18 * * *'  # 1:00 PM EST (UTC 18:00)
   
   # Allow manual trigger
   workflow_dispatch:
@@ -51,7 +52,7 @@ jobs:
           SEARCH_TERMS: ${{ vars.SEARCH_TERMS }}  # Legacy fallback for single recipient
           LOCATIONS: ${{ vars.LOCATIONS }}
           RESULTS_WANTED: ${{ vars.RESULTS_WANTED }}
-          HOURS_OLD: ${{ vars.HOURS_OLD }}  # Search jobs from last 9 hours
+          HOURS_OLD: ${{ vars.HOURS_OLD }}  # Search jobs from last 24 hours
           USE_LLM_FILTER: ${{ vars.USE_LLM_FILTER }}
           SITES: ${{ vars.SITES }}
         run: |

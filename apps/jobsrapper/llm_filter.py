@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 # OpenRouter API Configuration
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
-OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "liquid/lfm-2.5-1.2b-instruct")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "liquid/lfm-2.5-1.2b-instruct:free")
 
 
 class OpenRouterError(Exception):
@@ -208,6 +208,9 @@ async def _call_openrouter(
             if response.status != 200:
                 error_text = await response.text()
                 logger.error(f"OpenRouter API error{context_str}: {response.status} - {error_text}")
+                # Raise specific error for rate limiting (429)
+                if response.status == 429:
+                    raise OpenRouterError(f"Rate limited (429)")
                 raise OpenRouterError(f"API request failed with status {response.status}")
 
             data = await response.json()
@@ -293,7 +296,22 @@ async def evaluate_job_async(
 
     except OpenRouterError as e:
         logger.warning(f"OpenRouter error [{job_context}]: {e}")
-        # Default to pass on error
+        # On rate limit (429), filter out the job
+        if "429" in str(e) or "Rate limited" in str(e):
+            logger.warning(f"Rate limited - filtering out job [{job_context}]")
+            return {
+                "keyword_match": False,
+                "visa_sponsorship": False,
+                "entry_level": False,
+                "requires_phd": True,
+                "is_internship": True,
+                "reason": "Rate limited (429) - filtered out",
+                "error": True,
+                "rate_limited": True,
+                "job_title": job_title,
+                "company": company,
+            }
+        # Default to pass on other errors
         return {
             "keyword_match": True,
             "visa_sponsorship": True,
@@ -427,9 +445,14 @@ class OpenRouterLLMFilter:
         excluded_phd = 0
         excluded_internship = 0
         skipped = 0
+        error = 0
         no_visa_count = 0  # Track for stats, but don't filter
 
         for job, evaluation in results:
+            if evaluation.get("error", False):
+                error += 1
+                continue
+
             if evaluation.get("skipped", False):
                 skipped += 1
                 continue
@@ -459,6 +482,7 @@ class OpenRouterLLMFilter:
             job['llm_evaluation'] = evaluation
             filtered.append(job)
 
+        logger.info(f"   Skipped {error} errored jobs (error calling OpenRouter)")
         logger.info(f"   Skipped {skipped} jobs (no description)")
         logger.info(f"   Excluded {excluded_keyword} jobs (keyword mismatch)")
         logger.info(f"   Excluded {excluded_experience} jobs (not entry-level)")
@@ -570,13 +594,13 @@ async def main_async():
 
     search_terms = ["data analyst", "product manager", "data scientist"]
 
-    print("🧪 Testing OpenRouter LLM Filter...")
+    logger.info("🧪 Testing OpenRouter LLM Filter...")
 
     result = await evaluate_job_async(test_job, search_terms)
-    print("\n📊 Evaluation Result:")
-    print(json.dumps(result, indent=2))
+    logger.info("📊 Evaluation Result:")
+    logger.info(json.dumps(result, indent=2))
 
-    print(f"\n✅ Should include: {should_include_job(result)}")
+    logger.info(f"✅ Should include: {should_include_job(result)}")
 
 
 def main():
@@ -619,7 +643,7 @@ def _init_worker(model_path: str, n_ctx: int, n_threads: int) -> None:
     '''Initialize LLM model in worker process'''
     global _worker_llm, _worker_model_path
     _worker_model_path = model_path
-    print(f"   🔧 Worker {mp.current_process().name} loading model...")
+    logger.info(f"🔧 Worker {mp.current_process().name} loading model...")
     _worker_llm = Llama(
         model_path=model_path,
         n_ctx=n_ctx,
@@ -627,7 +651,7 @@ def _init_worker(model_path: str, n_ctx: int, n_threads: int) -> None:
         n_batch=512,
         verbose=False
     )
-    print(f"   ✅ Worker {mp.current_process().name} ready")
+    logger.info(f"✅ Worker {mp.current_process().name} ready")
 
 
 def _safe_str_worker(value, default: str = '') -> str:
@@ -795,13 +819,13 @@ class LocalLLMFilter:
 
         # Download model if not exists
         if not self.model_path.exists():
-            print(f"📥 Downloading model {self.MODEL_FILE}...")
+            logger.info(f"📥 Downloading model {self.MODEL_FILE}...")
             self._download_model()
 
         # Load model
-        print(f"🤖 Loading LLM model...")
+        logger.info(f"🤖 Loading LLM model...")
         self._load_model()
-        print(f"✅ LLM model loaded successfully")
+        logger.info(f"✅ LLM model loaded successfully")
 
     def _download_model(self):
         '''Download the GGUF model from HuggingFace'''
@@ -811,9 +835,9 @@ class LocalLLMFilter:
                 filename=self.MODEL_FILE,
                 local_dir=str(self.model_dir)
             )
-            print(f"✅ Model downloaded to {downloaded_path}")
+            logger.info(f"✅ Model downloaded to {downloaded_path}")
         except Exception as e:
-            print(f"❌ Failed to download model: {e}")
+            logger.error(f"❌ Failed to download model: {e}")
             raise
 
     def _load_model(self):
@@ -823,7 +847,7 @@ class LocalLLMFilter:
             # The model supports 128K but we'll use 8K to be safe
             n_ctx = 8192
 
-            print(f"   📊 Loading model with n_ctx={n_ctx}...")
+            logger.info(f"📊 Loading model with n_ctx={n_ctx}...")
 
             self.llm = Llama(
                 model_path=str(self.model_path),
@@ -832,9 +856,9 @@ class LocalLLMFilter:
                 n_batch=512,  # Batch size for prompt processing
                 verbose=True
             )
-            print(f"   ✅ Model loaded successfully (context: {n_ctx} tokens)")
+            logger.info(f"✅ Model loaded successfully (context: {n_ctx} tokens)")
         except Exception as e:
-            print(f"❌ Failed to load model: {e}")
+            logger.error(f"❌ Failed to load model: {e}")
             raise
 
     def _safe_str(self, value, default: str = '') -> str:
@@ -889,7 +913,7 @@ Respond ONLY with valid JSON:
             # Skip jobs with no description - can't evaluate them properly
             desc = self._safe_str(job.get('description'), '')
             if not desc or len(desc) < 50:
-                print(f"   ⏭️ Skipping {job.get('title', 'Unknown')[:40]} - no/short description ({len(desc)} chars)")
+                logger.debug(f"⏭️ Skipping {job.get('title', 'Unknown')[:40]} - no/short description ({len(desc)} chars)")
                 return {
                     "keyword_match": False,
                     "visa_sponsorship": False,
@@ -904,7 +928,7 @@ Respond ONLY with valid JSON:
 
             # Debug: print prompt stats
             prompt_len = len(prompt)
-            print(f"   📝 Job: {job.get('title', 'Unknown')[:40]} | Prompt: {prompt_len} chars | Desc: {len(desc)} chars")
+            logger.debug(f"📝 Job: {job.get('title', 'Unknown')[:40]} | Prompt: {prompt_len} chars | Desc: {len(desc)} chars")
 
             # Reset KV cache to avoid state corruption between requests
             self.llm.reset()
@@ -923,9 +947,9 @@ Respond ONLY with valid JSON:
 
             response_text = response['choices'][0]['message']['content'].strip()
             finish_reason = response['choices'][0].get('finish_reason', 'unknown')
-            print(f"   ✅ Response: {len(response_text)} chars, finish: {finish_reason}")
+            logger.debug(f"✅ Response: {len(response_text)} chars, finish: {finish_reason}")
             if response_text:
-                print(f"   📄 Raw response: {response_text[:200]}...")
+                logger.debug(f"📄 Raw response: {response_text[:200]}...")
 
             # Parse JSON from response
             result = self._parse_response(response_text)
@@ -940,30 +964,29 @@ Respond ONLY with valid JSON:
             desc = self._safe_str(job.get('description'), '')
             prompt = self._create_prompt(job, search_terms)
 
-            # Debug: print detailed error info
-            print(f"   ❌ ERROR for {job.get('title', 'Unknown')[:40]}")
-            print(f"      Error type: {type(e).__name__}")
-            print(f"      Error msg: {error_msg}")
-            print(f"      Prompt length: {len(prompt)} chars")
-            print(f"      Description length: {len(desc)} chars")
-            print(f"      Full traceback:")
-            traceback.print_exc()
+            # Debug: log detailed error info
+            logger.error(f"❌ ERROR for {job.get('title', 'Unknown')[:40]}")
+            logger.error(f"   Error type: {type(e).__name__}")
+            logger.error(f"   Error msg: {error_msg}")
+            logger.debug(f"   Prompt length: {len(prompt)} chars")
+            logger.debug(f"   Description length: {len(desc)} chars")
+            logger.debug(f"   Full traceback: {traceback.format_exc()}")
 
             # Estimate token count (rough: ~4 chars per token)
             estimated_tokens = len(prompt) // 4
-            print(f"      Estimated tokens: ~{estimated_tokens}")
-            print(f"      Model n_ctx: {self.llm.n_ctx()}")
+            logger.debug(f"   Estimated tokens: ~{estimated_tokens}")
+            logger.debug(f"   Model n_ctx: {self.llm.n_ctx()}")
 
             # If context overflow, retry with truncated description
             if "llama_decode returned -1" in error_msg and _retry:
                 # Try with much shorter description
                 if len(desc) > 1500:
-                    print(f"      🔄 Retrying with truncated description (1500 chars)...")
+                    logger.warning(f"   🔄 Retrying with truncated description (1500 chars)...")
                     truncated_job = job.copy()
                     truncated_job['description'] = desc[:1500] + "..."
                     return self.evaluate_job(truncated_job, search_terms, _retry=False)
 
-            print(f"⚠️ LLM evaluation error for {job.get('title', 'Unknown')}: {e}")
+            logger.warning(f"⚠️ LLM evaluation error for {job.get('title', 'Unknown')}: {e}")
             # Default to pass on error (let rule-based filter handle it)
             return {
                 "keyword_match": True,
@@ -1057,7 +1080,7 @@ Respond ONLY with valid JSON:
 
         for i, job in enumerate(jobs_list, 1):
             if verbose and i % 10 == 0:
-                print(f"   🤖 Evaluating {i}/{total}...")
+                logger.info(f"🤖 Evaluating {i}/{total}...")
 
             evaluation = self.evaluate_job(job, search_terms)
 
@@ -1090,13 +1113,13 @@ Respond ONLY with valid JSON:
             job['llm_evaluation'] = evaluation
             filtered.append(job)
 
-        print(f"   Skipped {skipped} jobs (no description)")
-        print(f"   Excluded {excluded_keyword} jobs (keyword mismatch)")
-        print(f"   Excluded {excluded_visa} jobs (no visa sponsorship)")
-        print(f"   Excluded {excluded_experience} jobs (not entry-level)")
-        print(f"   Excluded {excluded_phd} jobs (PhD required)")
-        print(f"   Excluded {excluded_internship} jobs (internship)")
-        print(f"   ✅ {len(filtered)} jobs passed LLM filter")
+        logger.info(f"Skipped {skipped} jobs (no description)")
+        logger.info(f"Excluded {excluded_keyword} jobs (keyword mismatch)")
+        logger.info(f"Excluded {excluded_visa} jobs (no visa sponsorship)")
+        logger.info(f"Excluded {excluded_experience} jobs (not entry-level)")
+        logger.info(f"Excluded {excluded_phd} jobs (PhD required)")
+        logger.info(f"Excluded {excluded_internship} jobs (internship)")
+        logger.info(f"✅ {len(filtered)} jobs passed LLM filter")
 
         return filtered
 
@@ -1130,14 +1153,14 @@ Respond ONLY with valid JSON:
 
             optimal = min(requested_workers, max_workers_by_ram, max_workers_by_cpu)
 
-            print(f"   💾 RAM: {available_gb:.1f}GB available / {total_gb:.1f}GB total")
-            print(f"   🔢 Workers: requested={requested_workers}, max_by_ram={max_workers_by_ram}, max_by_cpu={max_workers_by_cpu}")
-            print(f"   ✅ Using {optimal} worker(s)")
+            logger.info(f"💾 RAM: {available_gb:.1f}GB available / {total_gb:.1f}GB total")
+            logger.debug(f"🔢 Workers: requested={requested_workers}, max_by_ram={max_workers_by_ram}, max_by_cpu={max_workers_by_cpu}")
+            logger.info(f"✅ Using {optimal} worker(s)")
 
             return optimal
 
         except Exception as e:
-            print(f"   ⚠️ Could not detect RAM: {e}, using 1 worker")
+            logger.warning(f"⚠️ Could not detect RAM: {e}, using 1 worker")
             return 1
 
     def filter_jobs_parallel(
@@ -1173,11 +1196,11 @@ Respond ONLY with valid JSON:
 
         # For small job lists or single worker, use sequential processing
         if total < num_workers * 2 or num_workers == 1:
-            print(f"   📝 Using sequential processing (jobs={total}, workers={num_workers})...")
+            logger.info(f"📝 Using sequential processing (jobs={total}, workers={num_workers})...")
             return self.filter_jobs(jobs_list, search_terms, verbose)
 
-        print(f"   🚀 Starting parallel processing with {num_workers} workers...")
-        print(f"   📊 Processing {total} jobs...")
+        logger.info(f"🚀 Starting parallel processing with {num_workers} workers...")
+        logger.info(f"📊 Processing {total} jobs...")
 
         # Prepare args for workers: list of (job, search_terms) tuples
         work_items = [(job, search_terms) for job in jobs_list]
@@ -1196,8 +1219,8 @@ Respond ONLY with valid JSON:
                 # Process jobs in parallel
                 results = pool.map(_evaluate_job_worker, work_items)
         except Exception as e:
-            print(f"   ❌ Parallel processing failed: {e}")
-            print(f"   🔄 Falling back to sequential processing...")
+            logger.error(f"❌ Parallel processing failed: {e}")
+            logger.info(f"🔄 Falling back to sequential processing...")
             return self.filter_jobs(jobs_list, search_terms, verbose)
 
         # Process results
@@ -1241,13 +1264,13 @@ Respond ONLY with valid JSON:
             job['llm_evaluation'] = evaluation
             filtered.append(job)
 
-        print(f"   Skipped {skipped} jobs (no description)")
-        print(f"   Excluded {excluded_keyword} jobs (keyword mismatch)")
-        print(f"   Excluded {excluded_visa} jobs (no visa sponsorship)")
-        print(f"   Excluded {excluded_experience} jobs (not entry-level)")
-        print(f"   Excluded {excluded_phd} jobs (PhD required)")
-        print(f"   Excluded {excluded_internship} jobs (internship)")
-        print(f"   ✅ {len(filtered)} jobs passed LLM filter (parallel)")
+        logger.info(f"Skipped {skipped} jobs (no description)")
+        logger.info(f"Excluded {excluded_keyword} jobs (keyword mismatch)")
+        logger.info(f"Excluded {excluded_visa} jobs (no visa sponsorship)")
+        logger.info(f"Excluded {excluded_experience} jobs (not entry-level)")
+        logger.info(f"Excluded {excluded_phd} jobs (PhD required)")
+        logger.info(f"Excluded {excluded_internship} jobs (internship)")
+        logger.info(f"✅ {len(filtered)} jobs passed LLM filter (parallel)")
 
         return filtered
 """

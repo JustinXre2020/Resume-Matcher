@@ -5,12 +5,15 @@ Aggregates job postings from multiple sources using python-jobspy
 import os
 import time
 import random
+import logging
 from typing import List, Dict, Optional
 from jobspy import scrape_jobs
 import pandas as pd
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 
 class JobScraper:
@@ -42,8 +45,8 @@ class JobScraper:
         """
         for attempt in range(self.max_retries):
             try:
-                print(f"🔍 Scraping: '{search_term}' in '{location}' (Attempt {attempt + 1}/{self.max_retries})")
-                
+                logger.info(f"🔍 Scraping: '{search_term}' in '{location}' (Attempt {attempt + 1}/{self.max_retries})")
+
                 jobs = scrape_jobs(
                     site_name=self.sites,
                     search_term=search_term,
@@ -55,34 +58,34 @@ class JobScraper:
                     linkedin_fetch_description=False,  # Fast initial scrape
                     description_format="markdown"
                 )
-                
+
                 if jobs is not None and not jobs.empty:
-                    print(f"✅ Found {len(jobs)} jobs")
+                    logger.info(f"✅ Found {len(jobs)} jobs")
                     return jobs
                 else:
-                    print(f"⚠️ No jobs found for '{search_term}' in '{location}'")
+                    logger.warning(f"⚠️ No jobs found for '{search_term}' in '{location}'")
                     return None
-                    
+
             except Exception as e:
                 error_msg = str(e)
-                
+
                 # Handle 429 (Rate Limit) errors
                 if "429" in error_msg or "rate limit" in error_msg.lower():
                     delay = self.base_delay * (2 ** attempt) + random.uniform(0, 1)
-                    print(f"⏳ Rate limited (429). Backing off for {delay:.1f}s...")
+                    logger.warning(f"⏳ Rate limited (429). Backing off for {delay:.1f}s...")
                     time.sleep(delay)
                     continue
-                    
+
                 # Handle other errors
-                print(f"❌ Error on attempt {attempt + 1}: {error_msg}")
-                
+                logger.error(f"❌ Error on attempt {attempt + 1}: {error_msg}")
+
                 if attempt < self.max_retries - 1:
                     delay = self.base_delay + random.uniform(0, 1)
                     time.sleep(delay)
                 else:
-                    print(f"🚫 All retries failed for '{search_term}' in '{location}'")
+                    logger.error(f"🚫 All retries failed for '{search_term}' in '{location}'")
                     return None
-        
+
         return None
     
     def scrape_multiple_queries(
@@ -122,15 +125,15 @@ class JobScraper:
                 time.sleep(random.uniform(1, 3))
         
         if not all_jobs:
-            print("⚠️ No jobs found across all queries")
+            logger.warning("⚠️ No jobs found across all queries")
             return pd.DataFrame()
-        
+
         combined = pd.concat(all_jobs, ignore_index=True)
-        
+
         # Remove duplicates based on job_url
         combined = combined.drop_duplicates(subset=['job_url'], keep='first')
-        
-        print(f"📊 Total unique jobs scraped: {len(combined)}")
+
+        logger.info(f"📊 Total unique jobs scraped: {len(combined)}")
         return combined
     
     def fetch_linkedin_details(self, jobs_df: pd.DataFrame) -> pd.DataFrame:
@@ -148,7 +151,7 @@ class JobScraper:
         if linkedin_jobs.empty:
             return jobs_df
         
-        print(f"📄 Fetching detailed descriptions for {len(linkedin_jobs)} LinkedIn jobs...")
+        logger.info(f"📄 Fetching detailed descriptions for {len(linkedin_jobs)} LinkedIn jobs...")
         
         for idx, job in linkedin_jobs.iterrows():
             try:
@@ -166,7 +169,7 @@ class JobScraper:
                 time.sleep(random.uniform(2, 4))  # Respectful rate limiting
                 
             except Exception as e:
-                print(f"⚠️ Failed to fetch details for {job['job_url']}: {e}")
+                logger.warning(f"⚠️ Failed to fetch details for {job['job_url']}: {e}")
                 continue
         
         return jobs_df
@@ -195,10 +198,10 @@ def main():
     )
     
     if not jobs.empty:
-        print("\n📋 Sample jobs:")
-        print(jobs[['title', 'company', 'location', 'site']].head())
+        logger.info("📋 Sample jobs:")
+        logger.info(jobs[['title', 'company', 'location', 'site']].head())
     else:
-        print("❌ No jobs found")
+        logger.warning("❌ No jobs found")
 
 
 if __name__ == "__main__":

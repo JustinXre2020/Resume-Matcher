@@ -18,7 +18,7 @@ from database import JobDatabase
 from email_sender import EmailSender
 from data_manager import DataManager
 from llm_filter import OpenRouterLLMFilter
-from config import parse_recipients, get_all_search_terms
+from config import parse_recipients, get_all_search_terms, mask_email
 
 load_dotenv()
 
@@ -133,7 +133,7 @@ class JobHunterSentinel:
             logger.info("✅ Configuration loaded:")
             logger.info(f"   Recipients: {len(self.recipients)}")
             for r in self.recipients:
-                logger.info(f"     - {r.email} (needs_sponsorship={r.needs_sponsorship}, terms={r.search_terms})")
+                logger.info(f"     - {mask_email(r.email)} (needs_sponsorship={r.needs_sponsorship}, terms={r.search_terms})")
             logger.info(f"   All Search Terms: {self.all_search_terms}")
             logger.info(f"   Locations: {self.locations}")
             logger.info(f"   Results Wanted: {self.results_wanted}")
