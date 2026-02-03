@@ -82,21 +82,49 @@ def _create_prompt(job: Dict, search_terms: List[str]) -> str:
         - Ignore seniority levels (e.g., "II", "Senior", "Lead") unless the Target Role list specifically filters for them.
 
         2. visa_sponsorship: (true/false)
-        - Does the description explicitly state they will NOT provide sponsorship?
-        - Return FALSE if you see phrases like "Must be a US Citizen," "No sponsorship available," or "Work authorization required without sponsorship."
-        - Return TRUE if sponsorship is mentioned as available, OR if there is no mention of work authorization requirements (assume a neutral/positive stance).
+        - Logic: Is this job "Sponsorship Friendly" (i.e., not explicitly barred to visa holders)?
+        - DEFAULT to TRUE: If the job description is silent or neutral regarding work authorization, you must return TRUE.
+        - Return FALSE ONLY if there is an EXPLICIT negative statement. Examples of phrases that trigger FALSE: 
+            * "Must be a US Citizen or Permanent Resident."
+            * "No visa sponsorship available."
+            * "Candidates must be authorized to work in the US without the need for current or future sponsorship."
+            * "We do not sponsor H1-B visas."
+        - Return TRUE if:
+            * Sponsorship is mentioned as available.
+            * The text makes NO MENTION of work authorization, citizenship, or sponsorship requirements. (Silence = TRUE)
+        EXAMPLES:
+        - "Must be US Citizen or Permanent Resident" → FALSE
+        - "No visa sponsorship available" → FALSE
+        - No mention of authorization → TRUE (silence = TRUE)
+        - "Visa sponsorship available" → TRUE
 
         3. is_internship: (true/false)
-        - Return TRUE if the job is labeled as an "Intern," "Co-op," "Fellowship," or "Apprenticeship."
+        - Logic: Is this an internsip role?
+        - Rule: Return TRUE if the job is labeled as an "Intern," "Internship," "Co-op," "Fellowship," or "Apprenticeship." Otherwise, return FALSE.
 
         4. entry_level: (true/false)
-        - Determine if this is a "starting" role (0-3 years of experience).
-        - Return FALSE if: The title includes "Senior," "Lead," "Principal," "Director," or if the text requires 4+ years of experience.
-        - Return TRUE if: The title includes "Junior," "Associate," "Entry-level," "Trainee," "Intern," "Internship", or if the experience requirement is 0-3 years (or not mentioned).
+        DEFINITION: Entry-level roles are positions that require 0 years of professional experience.
+
+        STRICT SEARCH REQUIREMENT: You MUST carefully scan the 'Qualifications', 'Requirements', 'What You Will Bring', or similar sections for ANY numerical mention of years of experience required.
+
+        CRITICAL RULE: If you find ANY experience requirement that starts with a number GREATER than 0 (examples: "1 year", "1+ years", "2 years", "3+ years", "5 years of related experience"), you MUST return false.
+
+        Return true ONLY if ONE of these conditions is met:
+            a) The experience requirement explicitly starts with 0 (e.g., "0-2 years", "0-1 years of experience").
+            b) NO years of experience are mentioned anywhere in the qualifications/requirements section AND the job title contains "Junior", "Associate", or "Entry-Level".
+            c) The description explicitly states "No experience required" or "No prior experience necessary".
+
+        EXAMPLES:
+        - "Bachelor's Degree with 5 years of related experience" → entry_level: FALSE (requires 5 years)
+        - "Master's Degree and 3 years of experience" → entry_level: FALSE (requires 3 years)
+        - "1+ year of experience preferred" → entry_level: FALSE (requires 1+ years)
+        - "0-2 years of experience" → entry_level: TRUE (starts with 0)
+        - "Junior Developer, Bachelor's degree required" (no years mentioned) → entry_level: TRUE (Junior title + no years)
+        - "Software Engineer, Bachelor's degree required" (no years mentioned) → entry_level: FALSE (no Junior/Associate/Entry-Level in title)
 
         5. requires_phd: (true/false)
-        - Return TRUE only if a PhD or Doctorate is explicitly listed as a MANDATORY requirement. (If it is "preferred," return false).
-
+        - Logic: Is a Doctorate mandatory?
+        - Rule: Return TRUE only if a PhD is listed as a MANDATORY requirement. If it is "preferred" or not mentioned, return FALSE.
 
         ### OUTPUT FORMAT
         Respond ONLY with valid JSON.
@@ -106,7 +134,7 @@ def _create_prompt(job: Dict, search_terms: List[str]) -> str:
             "entry_level": boolean,
             "requires_phd": boolean,
             "is_internship": boolean,
-            "reason": "Identify the specific Target Role that matched and the years of experience found."
+            "reason": "A concise breakdown of the logic used for each field, citing specific text (or lack thereof) regarding target role match, exact years of experience found, visa restrictions, education, and internship identifiers."
         }}
         """
 
