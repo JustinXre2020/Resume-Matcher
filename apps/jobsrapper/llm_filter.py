@@ -77,9 +77,21 @@ def _create_prompt(job: Dict, search_terms: List[str]) -> str:
         Analyze the job posting above and extract the following data points into JSON format.
 
         1. keyword_match: (true/false)
-        - Perform a semantic match between the "Job Title" and the "Target Roles" list.
-        - Return TRUE if the job represents the same professional function as any Target Role, even if the wording differs. 
-        - Ignore seniority levels (e.g., "II", "Senior", "Lead") unless the Target Role list specifically filters for them.
+        - Logic: Compare the "Job Title" against the "Target Roles" list.
+        - Return TRUE if the job title represents the same professional function as any role in the Target Roles list, regardless of seniority level.
+        - Seniority modifiers to ignore: Senior, Lead, Staff, Principal, Junior, Entry-level, I, II, III, IV, etc.
+        - Examples:
+            * Job Title: "Senior Software Engineer - Web Platform"
+            * Target Roles: ["software engineer"]
+            * Result: TRUE (both are software engineering roles)
+            
+            * Job Title: "Lead Product Manager"
+            * Target Roles: ["software engineer", "product manager"]
+            * Result: TRUE (matches "product manager")
+            
+            * Job Title: "Data Scientist II"
+            * Target Roles: ["software engineer"]
+            * Result: FALSE (different professional function)
 
         2. visa_sponsorship: (true/false)
         - Logic: Is this job "Sponsorship Friendly" (i.e., not explicitly barred to visa holders)?
