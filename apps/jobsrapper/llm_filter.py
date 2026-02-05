@@ -239,10 +239,6 @@ async def _call_openrouter(
         )
 
         response_content = response.choices[0].message.content
-
-        # Log the response received
-        logger.debug(f"LLM_RESPONSE{context_str}:\n{'-'*60}\n{response_content}\n{'-'*60}")
-
         return response_content
 
     except Exception as e:
@@ -278,7 +274,6 @@ async def evaluate_job_async(
         # Skip jobs with no description
         desc = _safe_str(job.get('description'), '')
         if not desc or len(desc) < 50:
-            logger.debug(f"SKIPPED [{job_context}]: No description (length={len(desc)})")
             return {
                 "keyword_match": False,
                 "visa_sponsorship": False,
@@ -311,7 +306,7 @@ async def evaluate_job_async(
             f"entry={result.get('entry_level')}, "
             f"phd={result.get('requires_phd')}, "
             f"intern={result.get('is_internship')} | "
-            f"{result.get('reason', '')[:80]}"
+            f"{result.get('reason', '')}"
         )
 
         return result
