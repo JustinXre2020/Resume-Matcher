@@ -12,6 +12,8 @@ import logging
 from typing import Dict, List, Optional, Any
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
+from pydantic import BaseModel, Field
+import instructor
 import pandas as pd
 
 # Load environment variables
@@ -26,13 +28,35 @@ OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "liquid/lfm-2.5-1.2b-instruct:f
 _openrouter_client: Optional[AsyncOpenAI] = None
 
 
+class JobEvaluation(BaseModel):
+    """Structured LLM output for job evaluation."""
+    keyword_match: bool = Field(
+        description="True if the job title matches any target role (ignoring seniority modifiers like Senior, Lead, Staff, etc.)"
+    )
+    visa_sponsorship: bool = Field(
+        description="True unless the posting explicitly bars visa holders. Default True if silent on sponsorship."
+    )
+    entry_level: bool = Field(
+        description="True only if 0 years experience required, title contains Junior/Associate/Entry-Level with no years mentioned, or explicitly states no experience required."
+    )
+    requires_phd: bool = Field(
+        description="True only if a PhD/doctorate is listed as a mandatory requirement, not merely preferred."
+    )
+    is_internship: bool = Field(
+        description="True if the role is an internship, co-op, fellowship, or apprenticeship."
+    )
+    reason: str = Field(
+        description="Concise breakdown of the logic used for each field, citing specific text from the posting."
+    )
+
+
 def _get_openrouter_client() -> AsyncOpenAI:
     """Get or create the shared AsyncOpenAI client for OpenRouter."""
     global _openrouter_client
     if _openrouter_client is None:
         if not OPENROUTER_API_KEY:
             raise OpenRouterError("OPENROUTER_API_KEY environment variable not set")
-        _openrouter_client = AsyncOpenAI(
+        base_client = AsyncOpenAI(
             base_url=OPENROUTER_API_URL,
             api_key=OPENROUTER_API_KEY,
             default_headers={
@@ -41,6 +65,7 @@ def _get_openrouter_client() -> AsyncOpenAI:
             },
             timeout=60.0,
         )
+        _openrouter_client = instructor.from_openai(base_client, mode=instructor.Mode.JSON)
     return _openrouter_client
 
 
@@ -204,7 +229,8 @@ async def _call_openrouter(
     max_tokens: int = 8192,
     client: Optional[AsyncOpenAI] = None,
     job_context: Optional[str] = None,
-) -> str:
+    response_model: Optional[type] = None,
+) -> str | BaseModel:
     """
     Make an async call to OpenRouter API using AsyncOpenAI client.
 
@@ -215,9 +241,10 @@ async def _call_openrouter(
         max_tokens: Maximum tokens in response.
         client: Optional AsyncOpenAI client for connection reuse.
         job_context: Optional job identifier for logging (e.g., "Job Title @ Company").
+        response_model: Optional Pydantic model for structured output via instructor.
 
     Returns:
-        The assistant's response content.
+        The assistant's response content (str), or a validated Pydantic instance if response_model is provided.
 
     Raises:
         OpenRouterError: If the API call fails.
@@ -231,15 +258,24 @@ async def _call_openrouter(
     logger.debug(f"LLM_PROMPT{context_str}:\n{'-'*60}\n{user_prompt}\n{'-'*60}")
 
     try:
-        response = await client.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
-
-        response_content = response.choices[0].message.content
-        return response_content
+        if response_model:
+            response = await client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                response_model=response_model,
+            )
+            return response  # Validated Pydantic instance
+        else:
+            response = await client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            response_content = response.choices[0].message.content
+            return response_content
 
     except Exception as e:
         error_str = str(e)
@@ -293,8 +329,17 @@ async def evaluate_job_async(
             {"role": "user", "content": prompt}
         ]
 
-        response_text = await _call_openrouter(messages, client=client, job_context=job_context)
-        result = _parse_response(response_text)
+        try:
+            evaluation = await _call_openrouter(
+                messages, client=client, job_context=job_context,
+                response_model=JobEvaluation,
+            )
+            result = evaluation.model_dump()
+        except Exception as e:
+            logger.warning(f"Structured output failed [{job_context}]: {e}, falling back to text parsing")
+            response_text = await _call_openrouter(messages, client=client, job_context=job_context)
+            result = _parse_response(response_text)
+
         result['job_title'] = job_title
         result['company'] = company
 
