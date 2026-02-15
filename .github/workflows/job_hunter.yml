@@ -48,10 +48,15 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           OPENROUTER_MODEL: ${{ secrets.OPENROUTER_MODEL }}
+          # Agent Workflow Configuration
+          USE_AGENT_WORKFLOW: ${{ vars.USE_AGENT_WORKFLOW }}
+          REVIEWER_SAMPLE_RATE: ${{ vars.REVIEWER_SAMPLE_RATE }}
+          AGENT_CONCURRENCY: ${{ vars.AGENT_CONCURRENCY }}
           # Job Search Configuration
           SEARCH_TERMS: ${{ vars.SEARCH_TERMS }}  # Legacy fallback for single recipient
           LOCATIONS: ${{ vars.LOCATIONS }}
           RESULTS_WANTED: ${{ vars.RESULTS_WANTED }}
+          RESULTS_WANTED_MAP: ${{ vars.RESULTS_WANTED_MAP }}
           HOURS_OLD: ${{ vars.HOURS_OLD }}  # Search jobs from last 24 hours
           USE_LLM_FILTER: ${{ vars.USE_LLM_FILTER }}
           SITES: ${{ vars.SITES }}
@@ -85,7 +90,7 @@ jobs:
           git config --local user.name "GitHub Action"
           
           # Add database and data files
-          git add sent_jobs.txt data/*.json data/*.csv || true
+          git add sent_jobs.txt data/*.json data/*.csv data/*.jsonl || true
           
           # Commit if there are changes
           if ! git diff --staged --quiet; then

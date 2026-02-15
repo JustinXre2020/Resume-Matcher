@@ -16,7 +16,8 @@
       "Bash(npm run format:*)",
       "Bash(source .venv/bin/activate)",
       "Bash(python main.py:*)",
-      "Bash(pip install:*)"
+      "Bash(pip install:*)",
+      "Bash(uv run pytest:*)"
     ]
   }
 }
